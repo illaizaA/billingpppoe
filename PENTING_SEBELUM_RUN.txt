@@ -1,0 +1,9 @@
+BILLING 6 WILAYAH - UJI DI LOCALHOST
+
+1. Backup database main_billing yang sudah berjalan.
+2. Import database/update_database_6_wilayah.sql ke main_billing.
+3. Jangan menghapus user atau data pelanggan lama.
+4. Pastikan db_salam.php mengarah ke main_billing.
+5. Uji Super Admin: semua wilayah, filter alamat, tambah pelanggan alamat bebas, laporan, export, nota, dan WhatsApp.
+6. Uji setiap Admin Wilayah: hanya melihat wilayah sendiri dan alamat tambah/edit terkunci.
+7. Jangan mengganti source produksi sebelum seluruh pengujian selesai.

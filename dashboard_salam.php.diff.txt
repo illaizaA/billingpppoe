@@ -1,0 +1,88 @@
+--- dashboard_salam.php old
++++ dashboard_salam.php new
+@@ -144,6 +144,25 @@
+             transform: translateY(-2px);
+             box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+         }
++        .monitor-btn {
++            background-color: #2980b9;
++            color: white;
++            border: none;
++            padding: 8px 16px;
++            border-radius: 4px;
++            cursor: pointer;
++            text-decoration: none;
++            font-weight: 500;
++            display: flex;
++            align-items: center;
++            gap: 5px;
++            transition: all 0.3s ease;
++        }
++        .monitor-btn:hover {
++            background-color: #21618c;
++            transform: translateY(-2px);
++            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
++        }
+         
+         /* Container Styles */
+         .container {
+@@ -1717,6 +1736,9 @@
+                 <span><?= htmlspecialchars($_SESSION['username']); ?></span>
+             </div>
+             <?php if ($isSuperAdminSalam): ?>
++                <a href="monitoring_pppoe.php" class="monitor-btn">
++                    <i class="fas fa-map-location-dot"></i> Monitoring PPPoE
++                </a>
+                 <a href="kelola_admin.php" class="manage-btn">
+                     <i class="fas fa-user-gear"></i> Kelola Admin
+                 </a>
+@@ -1799,7 +1821,7 @@
+             <button class="modal-close" onclick="closeAddModal()"><i class="fas fa-times"></i></button>
+         </div>
+                     <div style="padding: 20px;">
+-                        <form id="add-customer-form">
++                        <form id="add-customer-form" enctype="multipart/form-data">
+                             <div class="grid">
+                                 <div class="col">
+                                     <label class="small">ID Pelanggan</label>
+@@ -1841,6 +1863,40 @@
+                                     <input type="number" name="tagihan" value="" required>
+                                 </div>
+                             </div>
++                            <div style="margin-top:18px;padding-top:15px;border-top:1px solid #e9eef3;">
++                                <div style="font-weight:700;color:#2c3e50;margin-bottom:10px;"><i class="fas fa-id-card"></i> Data Identitas & Lokasi <span style="font-weight:400;color:#7f8c8d;font-size:12px;">(opsional)</span></div>
++                                <div class="grid">
++                                    <div class="col">
++                                        <label class="small">Nama sesuai KTP</label>
++                                        <input type="text" name="nama_ktp">
++                                    </div>
++                                    <div class="col">
++                                        <label class="small">NIK</label>
++                                        <input type="text" name="nik" inputmode="numeric" maxlength="32">
++                                    </div>
++                                </div>
++                                <div class="grid" style="margin-top:12px">
++                                    <div class="col">
++                                        <label class="small">Username PPPoE</label>
++                                        <input type="text" name="pppoe_user" placeholder="Contoh: waduk-jumbadi">
++                                    </div>
++                                    <div class="col">
++                                        <label class="small">Foto Rumah</label>
++                                        <input type="file" name="foto_rumah" accept="image/jpeg,image/png,image/webp">
++                                    </div>
++                                </div>
++                                <div class="grid" style="margin-top:12px">
++                                    <div class="col">
++                                        <label class="small">Koordinat X (Longitude)</label>
++                                        <input type="number" step="0.00000001" name="koordinat_x" placeholder="110.48...">
++                                    </div>
++                                    <div class="col">
++                                        <label class="small">Koordinat Y (Latitude)</label>
++                                        <input type="number" step="0.00000001" name="koordinat_y" placeholder="-7.85...">
++                                    </div>
++                                </div>
++                                <div class="note">Username PPPoE digunakan hanya untuk menghubungkan data pelanggan Billing dengan titik PPPoE pada halaman monitoring. Maksimal foto 5 MB (JPG/PNG/WEBP).</div>
++                            </div>
+                             <div class="note">status pelanggan otomatis menjadi "Belum Lunas" jika taguhan > 0</div>
+ 
+                             <div class="actions">

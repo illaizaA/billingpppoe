@@ -1,0 +1,12 @@
+RINGKASAN PERUBAHAN
+====================
+Paket ini dibuat dari source: billing-main (7).zip
+Database acuan: salam_billing.sql
+
+Perubahan sengaja dipisahkan dari fitur transaksi agar risiko konflik kecil.
+Tidak ada file source PPPoE yang dimodifikasi.
+Sumber live yang dibaca: http://202.169.232.239:8078/api/pppoes
+Refresh monitoring: 5 detik (mengikuti pola refresh peta PPPoE yang ada).
+
+Struktur database utama pelanggan_salam TIDAK diubah.
+Data tambahan disimpan pada tabel baru pelanggan_detail_salam.

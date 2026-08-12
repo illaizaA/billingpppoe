@@ -1,0 +1,71 @@
+BILLING SALAM - FINAL AUTO MAPPING PPPoE
+
+KONSEP FINAL
+- Foto Rumah, Nama KTP, dan NIK dikelola dari Billing.
+- Foto rumah opsional saat Tambah Pelanggan.
+- Jika belum ada foto, sistem menampilkan placeholder.
+- Foto dapat ditambahkan/diganti melalui Edit Pelanggan.
+- Username PPPoE, ID teknis PPPoE, Koordinat X/Y, IP, dan Online/Offline tidak diisi Admin Billing.
+- Billing yang menyesuaikan ke PPPoE dan menyimpan mapping di database Billing.
+- Website PPPoE tidak diubah.
+- Billing hanya melakukan GET ke http://202.169.232.239:8078/api/pppoes.
+
+AUTO MAPPING
+1. Billing membaca data PPPoE asli.
+2. Jika ID Pelanggan Billing sama dengan ID PPPoE, pasangan disimpan otomatis.
+3. Jika ID berbeda, Billing mencoba kecocokan pasti Nama Lengkap/Nama KTP dengan lokasi/user PPPoE.
+4. Hanya satu kecocokan yang pasti yang akan disimpan.
+5. Jika tidak cocok, Billing tidak membuat data dummy. Marker tetap tampil dengan status/koordinat asli PPPoE.
+
+FILE YANG DIREPLACE
+- dashboard_salam.php
+- add_data_salam.php
+- edit_salam.php
+- delete_salam.php
+- pelanggan_detail_helper.php
+- get_pppoe_readonly.php
+- monitoring_pppoe.php
+- config_monitoring_pppoe.php
+- import_pelanggan_salam.php
+
+FILE BARU
+- pppoe_mapping_helper.php
+- template_import_pelanggan_FINAL.xlsx
+- database_update_billing_pppoe_FINAL.sql
+- uploads/foto_rumah/
+
+URUTAN PEMASANGAN
+1. Backup folder Billing dan database.
+2. Masuk phpMyAdmin lalu pilih database Billing yang aktif.
+3. Import database_update_billing_pppoe_FINAL.sql.
+4. Extract ZIP.
+5. Copy/replace file PHP ke folder utama Billing.
+6. Copy pppoe_mapping_helper.php ke folder utama Billing.
+7. Copy template_import_pelanggan_FINAL.xlsx ke folder utama Billing.
+8. Pastikan uploads/foto_rumah dapat ditulis PHP.
+9. Logout lalu login ulang.
+10. Tekan Ctrl + Shift + R.
+11. Tes Tambah Pelanggan tanpa foto.
+12. Edit pelanggan lalu upload foto.
+13. Buka Monitoring PPPoE dan cek marker merah/hijau, IP, serta koordinat.
+14. Tes Import Excel dengan template final.
+
+FORMAT EXCEL
+- ID Pelanggan
+- Nama Lengkap
+- Nama KTP
+- NIK
+- Nomor WhatsApp
+- Kode Pelanggan
+- Alamat
+- Paket
+- Tarif Langganan
+
+TIDAK ADA DI EXCEL / FORM ADMIN
+- Username PPPoE
+- ID teknis PPPoE
+- Koordinat X
+- Koordinat Y
+- IP
+- Status Online/Offline
+- Foto Rumah pada Excel

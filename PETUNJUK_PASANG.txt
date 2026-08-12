@@ -1,0 +1,39 @@
+PERUBAHAN AKSES ADMIN SALAM
+===========================
+
+Hasil akhir:
+- adminsalam  : role admin, wilayah SEMUA, dapat mengelola pelanggan semua wilayah.
+- admin_salam: role admin, wilayah SALAM, hanya dapat mengelola pelanggan Salam.
+- superadmin : tetap satu dan tetap memiliki laporan, Kelola Admin, serta config wilayah.
+
+LANGKAH PEMASANGAN
+------------------
+1. Backup folder project dan database terlebih dahulu.
+2. Timpa 10 file PHP dari paket ini ke folder utama project:
+   - helpers_salam.php
+   - dashboard_salam.php
+   - add_data_salam.php
+   - edit_salam.php
+   - get_alamat_salam.php
+   - get_data_salam.php
+   - get_stats_salam.php
+   - get_status_pelanggan_stats_salam.php
+   - check_message_limit_salam.php
+   - kelola_admin.php
+3. Di phpMyAdmin, pilih database Billing yang sedang digunakan.
+4. Import atau jalankan file update_adminsalam_semua_wilayah.sql.
+5. Logout lalu login kembali agar session wilayah diperbarui.
+6. Login sebagai Super Admin, buka Kelola Admin, lalu tambah:
+   Username : admin_salam
+   Wilayah  : SALAM
+   Password : tentukan sendiri
+7. Uji akun:
+   - adminsalam harus melihat filter Semua Wilayah dan seluruh pelanggan.
+   - admin_salam hanya boleh melihat pelanggan SALAM.
+
+CATATAN
+-------
+- Jangan import ulang database utama.
+- Tidak perlu mengubah config_salam.php atau config_wilayah.json.
+- Akun adminsalam tetap role admin, sehingga tidak dapat membuka Laporan atau Kelola Admin.
+- Ketika adminsalam mengirim WhatsApp, config pembayaran tetap mengikuti wilayah pelanggan.

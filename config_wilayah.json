@@ -1,0 +1,71 @@
+{
+    "baran": {
+        "wilayah": "BARAN",
+        "nama_layanan": "Billing BARAN / UKOOMED",
+        "metode_pembayaran": [
+            {
+                "jenis": "bank",
+                "nama": "BRI",
+                "nomor": "0987654",
+                "atas_nama": "KJKHGF"
+            },
+            {
+                "jenis": "ewallet",
+                "nama": "GOPAY",
+                "nomor": "987654789",
+                "atas_nama": "JKHGFCGH"
+            }
+        ],
+        "nomor_whatsapp": "6282338635691",
+        "catatan_pembayaran": "Konfirmasikan pembayaran kepada admin wilayah BARAN."
+    },
+    "gunungmanuk": {
+        "wilayah": "GUNUNGMANUK",
+        "nama_layanan": "Billing GUNUNGMANUK / UKOOMED",
+        "metode_pembayaran": [
+            {
+                "jenis": "ewallet",
+                "nama": "DANA",
+                "nomor": "58790-65098t6r56789",
+                "atas_nama": "ILLAIZA"
+            }
+        ],
+        "nomor_whatsapp": "6282338635691",
+        "catatan_pembayaran": "Konfirmasikan pembayaran kepada admin wilayah GUNUNGMANUK."
+    },
+    "ngasemayu": {
+        "wilayah": "NGASEMAYU",
+        "nama_layanan": "Billing NGASEMAYU / UKOOMED",
+        "metode_pembayaran": [],
+        "nomor_whatsapp": "",
+        "catatan_pembayaran": "Konfirmasikan pembayaran kepada admin wilayah NGASEMAYU."
+    },
+    "salam": {
+        "wilayah": "SALAM",
+        "nama_layanan": "Billing SALAM / UKOOMED",
+        "metode_pembayaran": [
+            {
+                "jenis": "bank",
+                "nama": "BCA",
+                "nomor": "8950258552",
+                "atas_nama": "Witono"
+            }
+        ],
+        "nomor_whatsapp": "6287839817566",
+        "catatan_pembayaran": ""
+    },
+    "trosari": {
+        "wilayah": "TROSARI",
+        "nama_layanan": "Billing TROSARI / UKOOMED",
+        "metode_pembayaran": [],
+        "nomor_whatsapp": "",
+        "catatan_pembayaran": "Konfirmasikan pembayaran kepada admin wilayah TROSARI."
+    },
+    "waduk": {
+        "wilayah": "WADUK",
+        "nama_layanan": "Billing WADUK / UKOOMED",
+        "metode_pembayaran": [],
+        "nomor_whatsapp": "",
+        "catatan_pembayaran": "Konfirmasikan pembayaran kepada admin wilayah WADUK."
+    }
+}

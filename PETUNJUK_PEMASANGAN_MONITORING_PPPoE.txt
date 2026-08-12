@@ -1,0 +1,108 @@
+BILLING SALAM - MONITORING PPPoE READ ONLY
+================================================
+
+TUJUAN
+- Menambah menu Monitoring PPPoE pada Super Admin Billing.
+- Data jaringan tetap dibaca LIVE dari http://202.169.232.239:8078/api/pppoes.
+- Billing hanya melakukan GET (baca data), tidak mengirim perintah perubahan ke PPPoE/Mikrotik.
+- Saat marker diklik, popup dapat menampilkan data pelanggan Billing + foto rumah jika Username PPPoE sudah dipasangkan.
+
+FILE LAMA YANG DIGANTI
+1. dashboard_salam.php
+   - tambah tombol Monitoring PPPoE untuk Super Admin
+   - tambah field profil pelanggan pada form Tambah Pelanggan
+2. add_data_salam.php
+   - simpan data identitas/lokasi/foto ke tabel detail baru
+3. edit_salam.php
+   - edit data identitas/lokasi/foto dan Username PPPoE
+
+FILE BARU
+- monitoring_pppoe.php
+- get_pppoe_readonly.php
+- config_monitoring_pppoe.php
+- pelanggan_detail_helper.php
+- database_update_monitoring_pppoe.sql
+- uploads/foto_rumah/.htaccess
+
+YANG TIDAK DIUBAH
+- db_salam.php
+- get_data_salam.php
+- get_stats_salam.php
+- get_status_pelanggan_stats_salam.php
+- update_status_salam.php
+- update_pelanggan_status_salam.php
+- laporan_salam.php
+- export_laporan_salam.php
+- nota_salam.php
+- kelola_admin.php
+- tagihan_salam
+- pelanggan_salam (struktur tabel lama tetap)
+- trigger/procedure/event tagihan bulanan
+- source code PPPoE
+
+DATABASE
+SQL hanya MENAMBAH tabel pelanggan_detail_salam.
+Tabel pelanggan_salam tidak diubah supaya fitur Billing lama tetap aman.
+Kolom tambahan disimpan di tabel baru:
+- nama_ktp
+- nik
+- koordinat_x
+- koordinat_y
+- foto_rumah
+- pppoe_user (penghubung ke username pada PPPoE)
+
+URUTAN PEMASANGAN
+1. BACKUP folder aplikasi Billing dan database salam_billing.
+2. Buka phpMyAdmin -> pilih database salam_billing.
+3. Import database_update_monitoring_pppoe.sql.
+4. Ekstrak ZIP paket.
+5. Salin semua file/folder dari ZIP ke folder aplikasi Billing.
+6. Saat ditanya Replace, yang tertimpa hanya:
+   - dashboard_salam.php
+   - add_data_salam.php
+   - edit_salam.php
+   File lain pada project tidak perlu dihapus.
+7. Pastikan folder uploads/foto_rumah bisa ditulis oleh web server.
+8. Logout lalu login kembali sebagai Super Admin.
+9. Klik menu Monitoring PPPoE.
+
+CARA MENGHUBUNGKAN PELANGGAN BILLING DENGAN MARKER PPPoE
+Contoh marker di PPPoE:
+  user = waduk-jumbadi
+
+Pada Tambah/Edit Pelanggan Billing, isi:
+  Username PPPoE = waduk-jumbadi
+
+Setelah disimpan, klik marker waduk-jumbadi pada Monitoring PPPoE.
+Popup akan menampilkan:
+- ID Pelanggan
+- Nama KTP
+- NIK
+- Koordinat X
+- Koordinat Y
+- Foto rumah
+- Username PPPoE
+- IP
+- Status ONLINE/OFFLINE
+
+CATATAN KOORDINAT
+- Koordinat X = Longitude, contoh 110.48...
+- Koordinat Y = Latitude, contoh -7.85...
+- Jika koordinat Billing belum diisi, popup tetap memakai koordinat live dari PPPoE untuk tampilan.
+
+READ ONLY
+Endpoint get_pppoe_readonly.php secara sengaja:
+- hanya menerima HTTP GET
+- hanya mengambil /api/pppoes
+- tidak memanggil /edit, /api/update-pppoe, /api/clear-queue, atau endpoint perubahan lainnya
+
+JIKA PETA TIDAK MUNCUL
+- Buka langsung http://202.169.232.239:8078/ dari jaringan kantor dan pastikan PPPoE hidup.
+- Pastikan server Billing bisa mengakses 202.169.232.239 port 8078.
+- Monitoring Billing akan menampilkan pesan error apabila endpoint PPPoE tidak dapat dijangkau.
+
+FOTO RUMAH
+- Format: JPG / PNG / WEBP
+- Maksimal: 5 MB
+- File disimpan ke uploads/foto_rumah/
+- Database hanya menyimpan path file, bukan binary foto.

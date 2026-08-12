@@ -1,0 +1,14 @@
+PERUBAHAN BILLING 6 WILAYAH
+
+- Database dan data lama tetap dipertahankan.
+- Admin Salam dan Super Admin lama tidak dihapus atau diubah.
+- Ditambahkan Admin BARAN, GUNUNGMANUK, NGASEMAYU, TROSARI, dan WADUK.
+- Super Admin tetap melihat serta mengelola semua alamat.
+- Super Admin bebas menambah pelanggan dengan alamat lama maupun alamat baru.
+- Alamat baru otomatis muncul pada filter wilayah Super Admin.
+- Admin Wilayah hanya melihat dan mengelola pelanggan wilayah sendiri.
+- Alamat saat tambah/edit oleh Admin Wilayah otomatis dikunci ke wilayah akun.
+- Dashboard dan statistik Admin Wilayah hanya menghitung wilayah sendiri.
+- Huruf besar/kecil, spasi, serta typo ringan untuk enam wilayah resmi dinormalisasi.
+- Config pembayaran/WhatsApp dibuat per wilayah; config SALAM lama tetap dipertahankan.
+- Laporan tetap hanya dapat diakses Super Admin dan mencakup semua wilayah.

@@ -1,0 +1,100 @@
+--- add_data_salam.php old
++++ add_data_salam.php new
+@@ -2,6 +2,7 @@
+ session_start();
+ require_once __DIR__ . '/db_salam.php';
+ require_once __DIR__ . '/helpers_salam.php';
++require_once __DIR__ . '/pelanggan_detail_helper.php';
+ header('Content-Type: application/json; charset=utf-8');
+ salamRequireLogin();
+ 
+@@ -20,6 +21,24 @@
+     ? salamNormalisasiAlamatInput($_POST['alamat'] ?? '')
+     : salamWilayahLogin();
+ $tarif = (float) str_replace(',', '.', (string) ($_POST['tagihan'] ?? 0));
++$namaKtp = trim((string) ($_POST['nama_ktp'] ?? ''));
++$nik = preg_replace('/\s+/', '', trim((string) ($_POST['nik'] ?? ''))) ?? '';
++$pppoeUser = salamNormalisasiPppoeUser($_POST['pppoe_user'] ?? '');
++try {
++    $koordinatX = salamKoordinatNullable($_POST['koordinat_x'] ?? '', -180, 180, 'Koordinat X');
++    $koordinatY = salamKoordinatNullable($_POST['koordinat_y'] ?? '', -90, 90, 'Koordinat Y');
++} catch (InvalidArgumentException $e) {
++    echo json_encode(['success'=>false,'message'=>$e->getMessage()]);
++    exit;
++}
++if ($nik !== '' && !preg_match('/^[0-9]{8,32}$/', $nik)) {
++    echo json_encode(['success'=>false,'message'=>'NIK hanya boleh berisi angka.']);
++    exit;
++}
++if (!salamDetailPelangganTableReady($koneksi)) {
++    echo json_encode(['success'=>false,'message'=>'Database fitur profil pelanggan belum dipasang. Import database_update_monitoring_pppoe.sql terlebih dahulu.']);
++    exit;
++}
+ 
+ if ($nama === '' || $paket === '') {
+     echo json_encode(['success'=>false,'message'=>'Nama dan paket wajib diisi.']);
+@@ -34,22 +53,50 @@
+     exit;
+ }
+ 
+-$stmt = $koneksi->prepare('INSERT INTO pelanggan_salam (id_pelanggan, kode_pelanggan, nama, nomor_pelanggan, alamat, paket, tarif_langganan, tagihan) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+-$stmt->bind_param('ssssssdd', $idPelanggan, $kodePelanggan, $nama, $nomor, $alamat, $paket, $tarif, $tarif);
+-if (!$stmt->execute()) {
+-    echo json_encode(['success'=>false,'message'=>'Gagal menyimpan pelanggan: '.$stmt->error]);
++$fotoBaru = null;
++$koneksi->begin_transaction();
++try {
++    $stmt = $koneksi->prepare('INSERT INTO pelanggan_salam (id_pelanggan, kode_pelanggan, nama, nomor_pelanggan, alamat, paket, tarif_langganan, tagihan) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
++    $stmt->bind_param('ssssssdd', $idPelanggan, $kodePelanggan, $nama, $nomor, $alamat, $paket, $tarif, $tarif);
++    if (!$stmt->execute()) {
++        throw new RuntimeException('Gagal menyimpan pelanggan: ' . $stmt->error);
++    }
++
++    $id = (int) $stmt->insert_id;
++    $stmt->close();
++    $kodeWilayah = salamKodeWilayah($alamat);
++    $generatedId = $idPelanggan !== '' ? $idPelanggan : $kodeWilayah . '-' . str_pad((string) $id, 5, '0', STR_PAD_LEFT);
++    $invoice = $kodeWilayah . '/INV/' . str_pad((string) $id, 5, '0', STR_PAD_LEFT) . '/' . date('m/Y');
++    $fix = $koneksi->prepare('UPDATE pelanggan_salam SET id_pelanggan = ?, nomor_invoice = ? WHERE id = ?');
++    $fix->bind_param('ssi', $generatedId, $invoice, $id);
++    if (!$fix->execute()) {
++        throw new RuntimeException('Gagal melengkapi ID pelanggan: ' . $fix->error);
++    }
++    $fix->close();
++
++    $fotoBaru = salamFotoRumahUpload($_FILES['foto_rumah'] ?? [], $generatedId);
++    salamUpsertPelangganDetail(
++        $koneksi,
++        $id,
++        $namaKtp,
++        $nik,
++        $koordinatX,
++        $koordinatY,
++        $fotoBaru ?? '',
++        $pppoeUser
++    );
++
++    $koneksi->commit();
++} catch (Throwable $e) {
++    $koneksi->rollback();
++    if ($fotoBaru !== null) {
++        salamHapusFotoRumah($fotoBaru);
++    }
++    http_response_code(400);
++    echo json_encode(['success'=>false,'message'=>$e->getMessage()]);
++    $koneksi->close();
+     exit;
+ }
+-
+-$id = (int) $stmt->insert_id;
+-$stmt->close();
+-$kodeWilayah = salamKodeWilayah($alamat);
+-$generatedId = $idPelanggan !== '' ? $idPelanggan : $kodeWilayah . '-' . str_pad((string) $id, 5, '0', STR_PAD_LEFT);
+-$invoice = $kodeWilayah . '/INV/' . str_pad((string) $id, 5, '0', STR_PAD_LEFT) . '/' . date('m/Y');
+-$fix = $koneksi->prepare('UPDATE pelanggan_salam SET id_pelanggan = ?, nomor_invoice = ? WHERE id = ?');
+-$fix->bind_param('ssi', $generatedId, $invoice, $id);
+-$fix->execute();
+-$fix->close();
+ 
+ $koneksi->close();
+ echo json_encode(['success'=>true,'message'=>'Pelanggan wilayah '.$alamat.' berhasil ditambahkan.']);

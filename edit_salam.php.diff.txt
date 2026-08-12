@@ -1,0 +1,170 @@
+--- edit_salam.php old
++++ edit_salam.php new
+@@ -2,6 +2,7 @@
+ session_start();
+ require_once __DIR__ . '/db_salam.php';
+ require_once __DIR__ . '/salam_bootstrap.php';
++require_once __DIR__ . '/pelanggan_detail_helper.php';
+ 
+ salamRequireLogin();
+ $canAccessAllWilayah = salamCanAccessAllWilayah();
+@@ -22,6 +23,10 @@
+ if (!$data) {
+     exit('Data pelanggan tidak ditemukan atau bukan wilayah akun ini.');
+ }
++if (!salamDetailPelangganTableReady($koneksi)) {
++    exit('Database fitur profil pelanggan belum dipasang. Import database_update_monitoring_pppoe.sql terlebih dahulu.');
++}
++$detail = salamGetPelangganDetail($koneksi, $id);
+ 
+ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update'])) {
+     $nama = trim((string) ($_POST['nama'] ?? ''));
+@@ -44,8 +49,24 @@
+     $statusBayar = ($_POST['status_bayar'] ?? 'Belum Lunas') === 'Lunas'
+         ? 'Lunas'
+         : 'Belum Lunas';
+-
+-    if ($nama === '' || $paket === '') {
++    $namaKtp = trim((string) ($_POST['nama_ktp'] ?? ''));
++    $nik = preg_replace('/\s+/', '', trim((string) ($_POST['nik'] ?? ''))) ?? '';
++    $pppoeUser = salamNormalisasiPppoeUser($_POST['pppoe_user'] ?? '');
++    try {
++        $koordinatX = salamKoordinatNullable($_POST['koordinat_x'] ?? '', -180, 180, 'Koordinat X');
++        $koordinatY = salamKoordinatNullable($_POST['koordinat_y'] ?? '', -90, 90, 'Koordinat Y');
++    } catch (InvalidArgumentException $e) {
++        $errorMessage = $e->getMessage();
++        $koordinatX = null;
++        $koordinatY = null;
++    }
++    if ($nik !== '' && !preg_match('/^[0-9]{8,32}$/', $nik)) {
++        $errorMessage = 'NIK hanya boleh berisi angka.';
++    }
++
++    if (!empty($errorMessage)) {
++        // Pesan validasi profil pelanggan sudah ditentukan di atas.
++    } elseif ($nama === '' || $paket === '') {
+         $errorMessage = 'Nama dan paket wajib diisi.';
+     } elseif ($tagihanPeriode < 0) {
+         $errorMessage = 'Tagihan tidak boleh negatif.';
+@@ -135,10 +156,51 @@
+             );
+         }
+ 
+-        $ok = $stmt && $stmt->execute();
+-        $dbError = $stmt ? $stmt->error : $koneksi->error;
+-        if ($stmt) {
+-            $stmt->close();
++        $fotoLama = (string) ($detail['foto_rumah'] ?? '');
++        $fotoBaru = null;
++        $ok = false;
++        $dbError = '';
++        try {
++            $koneksi->begin_transaction();
++            if (!$stmt || !$stmt->execute()) {
++                throw new RuntimeException($stmt ? $stmt->error : $koneksi->error);
++            }
++            if ($stmt) {
++                $stmt->close();
++                $stmt = null;
++            }
++
++            $fotoFinal = $fotoLama;
++            $fotoBaru = salamFotoRumahUpload($_FILES['foto_rumah'] ?? [], $idPelanggan !== '' ? $idPelanggan : ('pelanggan-' . $id));
++            if ($fotoBaru !== null) {
++                $fotoFinal = $fotoBaru;
++            }
++
++            salamUpsertPelangganDetail(
++                $koneksi,
++                $id,
++                $namaKtp,
++                $nik,
++                $koordinatX,
++                $koordinatY,
++                $fotoFinal,
++                $pppoeUser
++            );
++            $koneksi->commit();
++            $ok = true;
++            $detail = salamGetPelangganDetail($koneksi, $id);
++            if ($fotoBaru !== null && $fotoLama !== '' && $fotoLama !== $fotoBaru) {
++                salamHapusFotoRumah($fotoLama);
++            }
++        } catch (Throwable $e) {
++            $koneksi->rollback();
++            if ($stmt) {
++                $stmt->close();
++            }
++            if ($fotoBaru !== null) {
++                salamHapusFotoRumah($fotoBaru);
++            }
++            $dbError = $e->getMessage();
+         }
+ 
+         if ($ok) {
+@@ -174,6 +236,11 @@
+     $data['waktu'] = $periodeTagihan;
+     $data['langganan_selesai'] = $masaAktifSampai;
+     $data['status_bayar'] = $statusBayar;
++    $detail['nama_ktp'] = $namaKtp ?? ($detail['nama_ktp'] ?? '');
++    $detail['nik'] = $nik ?? ($detail['nik'] ?? '');
++    $detail['koordinat_x'] = $koordinatX ?? '';
++    $detail['koordinat_y'] = $koordinatY ?? '';
++    $detail['pppoe_user'] = $pppoeUser ?? '';
+ }
+ ?>
+ <!doctype html>
+@@ -206,7 +273,7 @@
+                 <div class="error-message"><strong>Error:</strong> <?= htmlspecialchars($errorMessage); ?></div>
+             <?php endif; ?>
+ 
+-            <form method="post">
++            <form method="post" enctype="multipart/form-data">
+                 <div class="grid">
+                     <div class="col">
+                         <label class="small">Nama</label>
+@@ -242,6 +309,44 @@
+                     <div class="col">
+                         <label class="small">Paket</label>
+                         <input type="text" name="paket" value="<?= htmlspecialchars((string) ($data['paket'] ?? '')); ?>" required>
++                    </div>
++                </div>
++
++                <div style="margin-top:18px;padding-top:14px;border-top:1px solid #e6eef6;">
++                    <div style="font-weight:700;color:#2c3e50;margin-bottom:10px;">Data Identitas & Lokasi</div>
++                    <div class="grid">
++                        <div class="col">
++                            <label class="small">Nama sesuai KTP</label>
++                            <input type="text" name="nama_ktp" value="<?= htmlspecialchars((string) ($detail['nama_ktp'] ?? '')); ?>">
++                        </div>
++                        <div class="col">
++                            <label class="small">NIK</label>
++                            <input type="text" name="nik" inputmode="numeric" maxlength="32" value="<?= htmlspecialchars((string) ($detail['nik'] ?? '')); ?>">
++                        </div>
++                    </div>
++                    <div class="grid" style="margin-top:12px">
++                        <div class="col">
++                            <label class="small">Username PPPoE</label>
++                            <input type="text" name="pppoe_user" value="<?= htmlspecialchars((string) ($detail['pppoe_user'] ?? '')); ?>" placeholder="Contoh: waduk-jumbadi">
++                            <div class="note">Digunakan untuk menghubungkan pelanggan dengan titik pada Monitoring PPPoE.</div>
++                        </div>
++                        <div class="col">
++                            <label class="small">Foto Rumah</label>
++                            <input type="file" name="foto_rumah" accept="image/jpeg,image/png,image/webp">
++                            <?php if (!empty($detail['foto_rumah'])): ?>
++                                <div class="note">Foto saat ini: <?= htmlspecialchars(basename((string) $detail['foto_rumah'])); ?>. Pilih file baru hanya jika ingin mengganti.</div>
++                            <?php endif; ?>
++                        </div>
++                    </div>
++                    <div class="grid" style="margin-top:12px">
++                        <div class="col">
++                            <label class="small">Koordinat X (Longitude)</label>
++                            <input type="number" step="0.00000001" name="koordinat_x" value="<?= htmlspecialchars((string) ($detail['koordinat_x'] ?? '')); ?>">
++                        </div>
++                        <div class="col">
++                            <label class="small">Koordinat Y (Latitude)</label>
++                            <input type="number" step="0.00000001" name="koordinat_y" value="<?= htmlspecialchars((string) ($detail['koordinat_y'] ?? '')); ?>">
++                        </div>
+                     </div>
+                 </div>
+ 
