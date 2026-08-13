@@ -261,6 +261,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update'])) {
             <?php endif; ?>
 
             <form method="post" enctype="multipart/form-data">
+                <div style="font-weight:700;color:#2c3e50;margin-bottom:10px;">Data Pelanggan</div>
                 <div class="grid">
                     <div class="col">
                         <label class="small">Nama</label>
@@ -300,7 +301,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update'])) {
                 </div>
 
                 <div style="margin-top:18px;padding-top:14px;border-top:1px solid #e6eef6;">
-                    <div style="font-weight:700;color:#2c3e50;margin-bottom:10px;">Data Identitas & Lokasi</div>
+                    <div style="font-weight:700;color:#2c3e50;margin-bottom:10px;">Data Identitas</div>
                     <div class="grid">
                         <div class="col">
                             <label class="small">Nama sesuai KTP</label>
@@ -332,30 +333,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update'])) {
                         </div>
                     </div>
 
-                    <div style="margin-top:12px;padding:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;">
-                        <div style="font-weight:700;color:#2c3e50;margin-bottom:8px;">Informasi PPPoE <span style="font-weight:400;color:#64748b;font-size:12px;">(READ ONLY)</span></div>
-                        <div class="grid">
-                            <div class="col">
-                                <label class="small">Koordinat X / Longitude</label>
-                                <div id="pppoe-coordinate-x" style="padding:10px 12px;border-radius:8px;background:#eef2f7;color:#475569;">Mencocokkan otomatis...</div>
-                            </div>
-                            <div class="col">
-                                <label class="small">Koordinat Y / Latitude</label>
-                                <div id="pppoe-coordinate-y" style="padding:10px 12px;border-radius:8px;background:#eef2f7;color:#475569;">Mencocokkan otomatis...</div>
-                            </div>
-                        </div>
-                        <div class="grid" style="margin-top:10px">
-                            <div class="col">
-                                <label class="small">IP / User / Status</label>
-                                <div id="pppoe-network-info" style="padding:10px 12px;border-radius:8px;background:#eef2f7;color:#475569;">Data berasal dari PPPoE asli.</div>
-                            </div>
-                        </div>
-                        <div id="pppoe-coordinate-note" class="note">
-                            Billing yang menyesuaikan ke data PPPoE. Admin tidak mengisi ID teknis, username PPPoE, koordinat, IP, atau status jaringan.
-                        </div>
-                    </div>
+
                 </div>
 
+                <div style="margin-top:18px;padding-top:14px;border-top:1px solid #e6eef6;">
+                    <div style="font-weight:700;color:#2c3e50;margin-bottom:10px;">Tagihan</div>
                 <div class="grid" style="margin-top:12px">
                     <div class="col">
                         <label class="small">Periode Tagihan</label>
@@ -383,6 +365,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update'])) {
                             <option value="Belum Lunas" <?= ($data['status_bayar'] ?? '') !== 'Lunas' ? 'selected' : ''; ?>>Belum Lunas</option>
                         </select>
                         
+                    </div>
+                </div>
+
+                </div>
+
+                <div style="margin-top:18px;padding-top:14px;border-top:1px solid #e6eef6;">
+                    <div style="margin-top:0;padding:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;">
+                        <div style="font-weight:700;color:#2c3e50;margin-bottom:8px;">Informasi Jaringan <span style="font-weight:400;color:#64748b;font-size:12px;">(Hanya lihat)</span></div>
+                        <div class="grid">
+                            <div class="col">
+                                <label class="small">Koordinat X / Longitude</label>
+                                <div id="pppoe-coordinate-x" style="padding:10px 12px;border-radius:8px;background:#eef2f7;color:#475569;">Mencocokkan otomatis...</div>
+                            </div>
+                            <div class="col">
+                                <label class="small">Koordinat Y / Latitude</label>
+                                <div id="pppoe-coordinate-y" style="padding:10px 12px;border-radius:8px;background:#eef2f7;color:#475569;">Mencocokkan otomatis...</div>
+                            </div>
+                        </div>
+                        <div class="grid" style="margin-top:10px">
+                            <div class="col">
+                                <label class="small">IP / User / Status</label>
+                                <div id="pppoe-network-info" style="padding:10px 12px;border-radius:8px;background:#eef2f7;color:#475569;">Data berasal dari PPPoE asli.</div>
+                            </div>
+                        </div>
+                        <div id="pppoe-coordinate-note" class="note">
+                            Billing yang menyesuaikan ke data PPPoE. Admin tidak mengisi ID teknis, username PPPoE, koordinat, IP, atau status jaringan.
+                        </div>
                     </div>
                 </div>
 
