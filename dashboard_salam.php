@@ -1724,6 +1724,234 @@ $alamatWilayahResmi = array_values(salamDaftarWilayahResmi());
             }
         }
 
+
+
+    /* =========================================================
+       Tampilan Import Excel — UI ONLY
+       Tidak mengubah proses import / endpoint / database.
+       ========================================================= */
+    #import-add-panel .import-excel-intro {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 16px;
+        margin-bottom: 14px;
+        border: 1px solid #d7eadf;
+        border-radius: 12px;
+        background: #f4fbf7;
+    }
+
+    #import-add-panel .import-excel-icon {
+        width: 48px;
+        height: 48px;
+        flex: 0 0 48px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 12px;
+        background: #1fa45a;
+        color: #fff;
+        font-size: 21px;
+        box-shadow: 0 6px 16px rgba(31, 164, 90, .18);
+    }
+
+    #import-add-panel .import-excel-title {
+        color: #26384a;
+        font-size: 17px;
+        line-height: 1.25;
+        font-weight: 800;
+    }
+
+    #import-add-panel .import-excel-subtitle {
+        margin-top: 4px;
+        color: #6c7c8d;
+        font-size: 13px;
+        line-height: 1.45;
+    }
+
+    #import-add-panel .import-excel-steps {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+        margin-bottom: 14px;
+    }
+
+    #import-add-panel .import-excel-step {
+        min-height: 50px;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 10px 12px;
+        border: 1px solid #dde6ee;
+        border-radius: 10px;
+        background: #fff;
+        color: #536273;
+        box-sizing: border-box;
+    }
+
+    #import-add-panel .import-excel-step span {
+        width: 27px;
+        height: 27px;
+        flex: 0 0 27px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        background: #e8f7ef;
+        color: #168348;
+        font-size: 13px;
+        font-weight: 800;
+    }
+
+    #import-add-panel .import-excel-step strong {
+        font-size: 12.5px;
+        line-height: 1.3;
+        font-weight: 700;
+    }
+
+    #import-add-panel .import-excel-upload {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        border: 1.5px dashed #a9bfd3;
+        border-radius: 12px;
+        background: #fbfdff;
+        text-align: center;
+    }
+
+    #import-add-panel .import-excel-upload-icon {
+        width: 50px;
+        height: 50px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 10px;
+        border-radius: 14px;
+        background: #e8f7ef;
+        color: #1f9d55;
+        font-size: 21px;
+    }
+
+    #import-add-panel .import-excel-upload-title {
+        color: #2d4054;
+        font-size: 14px;
+        font-weight: 800;
+    }
+
+    #import-add-panel .import-excel-upload-hint {
+        margin-top: 4px;
+        color: #8291a2;
+        font-size: 12px;
+    }
+
+    #import-add-panel .import-excel-file-input {
+        width: min(100%, 430px);
+        margin-top: 13px;
+        padding: 5px;
+        border: 1px solid #dce6ee;
+        border-radius: 9px;
+        background: #fff;
+        color: #667788;
+        font-size: 12px;
+        box-sizing: border-box;
+    }
+
+    #import-add-panel .import-excel-file-input::file-selector-button {
+        margin-right: 10px;
+        padding: 9px 13px;
+        border: 0;
+        border-radius: 7px;
+        background: #1f9d55;
+        color: #fff;
+        font-weight: 700;
+        cursor: pointer;
+    }
+
+    #import-add-panel .import-excel-template {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        margin-top: 14px;
+        padding: 13px 14px;
+        border: 1px solid #dde6ee;
+        border-radius: 10px;
+        background: #f8fafc;
+    }
+
+    #import-add-panel .import-excel-template-text {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        min-width: 0;
+    }
+
+    #import-add-panel .import-excel-template-text strong {
+        color: #334155;
+        font-size: 13px;
+    }
+
+    #import-add-panel .import-excel-template-text span {
+        color: #7a8998;
+        font-size: 12px;
+        line-height: 1.4;
+    }
+
+    #import-add-panel .import-excel-download {
+        flex: 0 0 auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        padding: 9px 12px;
+        border: 1px solid #add7bd;
+        border-radius: 8px;
+        background: #fff;
+        color: #168348;
+        text-decoration: none;
+        font-size: 12.5px;
+        font-weight: 800;
+        white-space: nowrap;
+    }
+
+    #import-add-panel .import-excel-download:hover {
+        background: #f0faf4;
+    }
+
+    #import-add-panel .import-excel-actions {
+        padding-top: 16px;
+    }
+
+    #import-add-panel .import-excel-submit {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        background: #1f9d55;
+        color: #fff;
+    }
+
+    #import-add-panel .import-excel-submit:hover {
+        background: #188b4b;
+    }
+
+    @media (max-width: 620px) {
+        #import-add-panel .import-excel-steps {
+            grid-template-columns: 1fr;
+        }
+
+        #import-add-panel .import-excel-template {
+            align-items: stretch;
+            flex-direction: column;
+        }
+
+        #import-add-panel .import-excel-download {
+            width: 100%;
+            box-sizing: border-box;
+        }
+    }
+
     </style>
 </head>
 <body>
@@ -1891,11 +2119,7 @@ $alamatWilayahResmi = array_values(salamDaftarWilayahResmi());
                                     <div class="col">
                                         <label class="small">Foto Rumah <span style="font-weight:400;color:#7f8c8d;">(opsional)</span></label>
                                         <input type="file" name="foto_rumah" accept="image/jpeg,image/png,image/webp">
-                                        <div class="note">Jika belum ada foto, biarkan kosong. Sistem menampilkan placeholder dan foto dapat ditambahkan nanti melalui Edit Pelanggan.</div>
                                     </div>
-                                </div>
-                                <div class="note" style="margin-top:10px;background:#f8fafc;border:1px solid #e2e8f0;padding:10px;border-radius:8px;">
-                                    <b>Data teknis PPPoE tidak diinput dari Billing.</b> ID teknis, username PPPoE, koordinat, IP, dan status dicocokkan/dibaca otomatis dari PPPoE asli.
                                 </div>
                                 <div class="note">Maksimal foto 5 MB (JPG/PNG/WEBP).</div>
                             </div>
@@ -1910,66 +2134,62 @@ $alamatWilayahResmi = array_values(salamDaftarWilayahResmi());
 
                         <?php if ($isSuperAdminSalam): ?>
                         <div id="import-add-panel" style="display:none;">
-                            <div style="background:#f8fbfd;border:1px solid #dbe7ef;border-radius:10px;padding:16px;margin-bottom:14px;">
-                                <div style="font-weight:700;color:#2c3e50;margin-bottom:6px;">
-                                    <i class="fas fa-file-excel" style="color:#1f9d55;"></i> Import Banyak Pelanggan dari Excel
+                            <div class="import-excel-intro">
+                                <div class="import-excel-icon" aria-hidden="true">
+                                    <i class="fas fa-file-excel"></i>
                                 </div>
-                                <div style="font-size:13px;color:#657786;line-height:1.55;">
-                                    Gunakan template Excel agar nama kolom sesuai. Import hanya menambah pelanggan baru dan tidak mengubah data pelanggan yang sudah ada.
+                                <div>
+                                    <div class="import-excel-title">Import Excel</div>
+                                    <div class="import-excel-subtitle">Tambahkan banyak pelanggan dari satu file.</div>
+                                </div>
+                            </div>
+
+                            <div class="import-excel-steps" aria-label="Langkah import Excel">
+                                <div class="import-excel-step">
+                                    <span>1</span>
+                                    <strong>Download template</strong>
+                                </div>
+                                <div class="import-excel-step">
+                                    <span>2</span>
+                                    <strong>Isi data pelanggan</strong>
+                                </div>
+                                <div class="import-excel-step">
+                                    <span>3</span>
+                                    <strong>Pilih file &amp; import</strong>
                                 </div>
                             </div>
 
                             <form id="import-customer-form" enctype="multipart/form-data">
-                                <label class="small">File Excel (.xlsx)</label>
-                                <input type="file" name="file_import" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
-
-                                <div class="note" style="margin-top:10px;">
-                                    Kolom wajib: Paket, Alamat, Tarif Langganan, serta Nama Lengkap atau Nama KTP. Maksimal 1.000 pelanggan / 5 MB.
-                                    Data teknis PPPoE tidak diimpor karena Billing menyesuaikan otomatis ke PPPoE asli. Foto rumah juga tidak diimpor dari Excel; foto ditambahkan dari Billing melalui Tambah/Edit Pelanggan.
+                                <div class="import-excel-upload">
+                                    <div class="import-excel-upload-icon" aria-hidden="true">
+                                        <i class="fas fa-cloud-upload-alt"></i>
+                                    </div>
+                                    <div class="import-excel-upload-title">Pilih file Excel dari perangkat</div>
+                                    <div class="import-excel-upload-hint">File .xlsx &bull; Maksimal 5 MB</div>
+                                    <input
+                                        id="import-file-input"
+                                        class="import-excel-file-input"
+                                        type="file"
+                                        name="file_import"
+                                        accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                        required
+                                    >
                                 </div>
 
-                                <div style="margin-top:14px;padding:14px;border:1px solid #dbe7ef;border-radius:10px;background:#f8fbfd;">
-                                    <div style="font-weight:700;color:#2c3e50;margin-bottom:8px;">
-                                        <i class="fas fa-table"></i> Format Template Excel
+                                <div class="import-excel-template">
+                                    <div class="import-excel-template-text">
+                                        <strong>Belum punya format Excel?</strong>
+                                        <span>Gunakan template agar format data sesuai.</span>
                                     </div>
-
-                                    <div style="font-size:13px;color:#5f6b76;line-height:1.6;margin-bottom:10px;">
-                                        Gunakan urutan kolom berikut agar proses import sesuai:
-                                    </div>
-
-                                    <div style="overflow-x:auto;">
-                                        <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:760px;">
-                                            <thead>
-                                                <tr style="background:#eef4f8;color:#34495e;">
-                                                    <th style="padding:8px;border:1px solid #dbe7ef;text-align:left;">ID Pelanggan</th>
-                                                    <th style="padding:8px;border:1px solid #dbe7ef;text-align:left;">Nama Lengkap</th>
-                                                    <th style="padding:8px;border:1px solid #dbe7ef;text-align:left;">Nama KTP</th>
-                                                    <th style="padding:8px;border:1px solid #dbe7ef;text-align:left;">NIK</th>
-                                                    <th style="padding:8px;border:1px solid #dbe7ef;text-align:left;">Nomor WhatsApp</th>
-                                                    <th style="padding:8px;border:1px solid #dbe7ef;text-align:left;">Kode Pelanggan</th>
-                                                    <th style="padding:8px;border:1px solid #dbe7ef;text-align:left;">Alamat</th>
-                                                    <th style="padding:8px;border:1px solid #dbe7ef;text-align:left;">Paket</th>
-                                                    <th style="padding:8px;border:1px solid #dbe7ef;text-align:left;">Tarif Langganan</th>
-                                                </tr>
-                                            </thead>
-                                        </table>
-                                    </div>
-
-                                    <div style="margin-top:10px;font-size:12px;color:#64748b;line-height:1.55;">
-                                        <b>Tidak perlu dicantumkan di Excel:</b> Foto Rumah, Username PPPoE, ID teknis PPPoE, Koordinat X/Y, IP, dan Status Online/Offline.
-                                    </div>
-
-                                    <a href="template_import_pelanggan_FINAL.xlsx"
-                                       download
-                                       style="display:inline-flex;align-items:center;gap:8px;margin-top:12px;padding:9px 13px;background:#1f9d55;color:#fff;border-radius:8px;font-weight:700;text-decoration:none;">
-                                        <i class="fas fa-download"></i> Download Template Excel
+                                    <a href="template_import_pelanggan.xlsx" download class="import-excel-download">
+                                        <i class="fas fa-download"></i> Download Template
                                     </a>
                                 </div>
 
-                                <div class="actions">
+                                <div class="actions import-excel-actions">
                                     <button type="button" class="btn btn-muted" onclick="closeAddModal()">Batal</button>
-                                    <button type="submit" class="btn btn-primary" style="background:#1f9d55;">
-                                        <i class="fas fa-file-import"></i> Import Pelanggan
+                                    <button type="submit" class="btn import-excel-submit">
+                                        <i class="fas fa-file-import"></i> Import Data
                                     </button>
                                 </div>
                             </form>
