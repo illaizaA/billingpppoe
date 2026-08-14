@@ -116,36 +116,66 @@ function salamRuntimeNormalize(?string $value): string
     return preg_replace('/[^a-z0-9]+/', '', $value) ?? '';
 }
 
-function salamRuntimePppoeNameKeys(array $row): array
+function salamRuntimePppoeMatchPairs(array $row): array
 {
-    $keys = [];
+    $pairs = [];
 
-    foreach (['lokasi', 'user', 'name', 'nama'] as $field) {
-        $raw = trim((string) ($row[$field] ?? ''));
+    $addressAliases = [
+        'salam' => 'salam',
+        'slm' => 'salam',
+        'baran' => 'baran',
+        'brn' => 'baran',
+        'gunungmanuk' => 'gunungmanuk',
+        'gunung' => 'gunungmanuk',
+        'gm' => 'gunungmanuk',
+        'ngasemayu' => 'ngasemayu',
+        'ngasem' => 'ngasemayu',
+        'nga' => 'ngasemayu',
+        'trosari' => 'trosari',
+        'trs' => 'trosari',
+        'waduk' => 'waduk',
+        'wdk' => 'waduk',
+    ];
 
-        if ($raw === '') {
-            continue;
+    $addPair = static function (string $raw, string $source) use (&$pairs, $addressAliases): void {
+        $raw = trim($raw);
+
+        if ($raw === '' || !str_contains($raw, '-')) {
+            return;
         }
 
-        $normalized = salamRuntimeNormalize($raw);
+        [$rawAddress, $rawName] = explode('-', $raw, 2);
+        $addressKey = salamRuntimeNormalize($rawAddress);
+        $nameKey = salamRuntimeNormalize($rawName);
 
-        if ($normalized !== '') {
-            $keys[$normalized] = true;
+        if ($addressKey === '' || $nameKey === '') {
+            return;
         }
 
-        // Ambil bagian setelah tanda "-" untuk nama seperti:
-        // salam-tulus / SLM-Tulus / waduk-jumbadi
-        if (str_contains($raw, '-')) {
-            $parts = explode('-', $raw, 2);
-            $suffix = salamRuntimeNormalize($parts[1] ?? '');
+        $addressKey = $addressAliases[$addressKey] ?? $addressKey;
+        $pairKey = $nameKey . '|' . $addressKey;
 
-            if ($suffix !== '') {
-                $keys[$suffix] = true;
-            }
+        if (!isset($pairs[$pairKey])) {
+            $pairs[$pairKey] = [
+                'name' => $nameKey,
+                'address' => $addressKey,
+                'source' => $source,
+            ];
         }
+    };
+
+    // Prioritas utama: username PPPoE.
+    foreach (['user', 'username'] as $field) {
+        $addPair((string) ($row[$field] ?? ''), 'username');
     }
 
-    return array_keys($keys);
+    // Cadangan hanya untuk membaca pasangan nama + wilayah bila source PPPoE
+    // menaruh format tersebut pada lokasi/name/nama.
+    foreach (['lokasi', 'name', 'nama'] as $field) {
+        $addPair((string) ($row[$field] ?? ''), 'lokasi');
+    }
+
+    return array_values($pairs);
 }
 
 function salamBillingPublicRow(array $row): array
@@ -167,8 +197,8 @@ function salamBillingPublicRow(array $row): array
  */
 function salamBuildRuntimeBillingIndex(array $rows): array
 {
-    $byCustomerId = [];
-    $byName = [];
+    $byCustomerNameAddress = [];
+    $byKtpNameAddress = [];
 
     foreach ($rows as $row) {
         $internalId = (int) ($row['id'] ?? 0);
@@ -177,55 +207,84 @@ function salamBuildRuntimeBillingIndex(array $rows): array
             continue;
         }
 
-        $customerId = salamRuntimeNormalize($row['id_pelanggan'] ?? '');
+        $addressKey = salamRuntimeNormalize($row['alamat'] ?? '');
 
-        if ($customerId !== '') {
-            $byCustomerId[$customerId][$internalId] = $row;
+        if ($addressKey === '') {
+            continue;
         }
 
-        foreach ([$row['nama'] ?? '', $row['nama_ktp'] ?? ''] as $name) {
-            $key = salamRuntimeNormalize($name);
+        $customerNameKey = salamRuntimeNormalize($row['nama'] ?? '');
+        if ($customerNameKey !== '') {
+            $key = $customerNameKey . '|' . $addressKey;
+            $byCustomerNameAddress[$key][$internalId] = $row;
+        }
 
-            if ($key !== '') {
-                $byName[$key][$internalId] = $row;
-            }
+        $ktpNameKey = salamRuntimeNormalize($row['nama_ktp'] ?? '');
+        if ($ktpNameKey !== '') {
+            $key = $ktpNameKey . '|' . $addressKey;
+            $byKtpNameAddress[$key][$internalId] = $row;
         }
     }
 
     return [
-        'by_customer_id' => $byCustomerId,
-        'by_name' => $byName,
+        'by_customer_name_address' => $byCustomerNameAddress,
+        'by_ktp_name_address' => $byKtpNameAddress,
     ];
 }
 
 /**
- * Cocokkan hanya ketika hasilnya pasti/tunggal.
- * Urutan:
- * 1. ID Pelanggan Billing == ID PPPoE.
- * 2. Nama/Nama KTP Billing == nama/lokasi/user PPPoE.
+ * Matching runtime tanpa menyimpan mapping.
+ * Urutan final:
+ * 1. Username/lokasi PPPoE -> Nama Pelanggan Billing + Alamat.
+ * 2. Jika gagal -> Username/lokasi PPPoE -> Nama KTP Billing + Alamat.
+ * 3. Jika gagal atau ambigu -> tidak terhubung.
  *
- * Tidak ada tebakan dan tidak ada penyimpanan mapping.
+ * ID pelanggan Billing hanya ditampilkan setelah match berhasil,
+ * bukan digunakan sebagai bahan pencocokan.
  */
 function salamFindRuntimeBillingMatch(array $pppoeRow, array $index): ?array
 {
-    $pppoeId = salamRuntimeNormalize($pppoeRow['id'] ?? '');
+    $pairs = salamRuntimePppoeMatchPairs($pppoeRow);
 
-    if ($pppoeId !== '' && isset($index['by_customer_id'][$pppoeId])) {
-        $rows = array_values($index['by_customer_id'][$pppoeId]);
-
-        if (count($rows) === 1) {
-            return $rows[0];
-        }
+    if (!$pairs) {
+        return null;
     }
 
+    // Tahap 1: Nama Pelanggan + Alamat.
     $candidateRows = [];
 
-    foreach (salamRuntimePppoeNameKeys($pppoeRow) as $nameKey) {
-        if (!isset($index['by_name'][$nameKey])) {
+    foreach ($pairs as $pair) {
+        $key = $pair['name'] . '|' . $pair['address'];
+
+        if (!isset($index['by_customer_name_address'][$key])) {
             continue;
         }
 
-        foreach ($index['by_name'][$nameKey] as $internalId => $row) {
+        foreach ($index['by_customer_name_address'][$key] as $internalId => $row) {
+            $candidateRows[(int) $internalId] = $row;
+        }
+    }
+
+    if (count($candidateRows) === 1) {
+        return array_values($candidateRows)[0];
+    }
+
+    // Lebih dari satu hasil pada tahap utama = ambigu, jangan menebak.
+    if (count($candidateRows) > 1) {
+        return null;
+    }
+
+    // Tahap 2: Nama KTP + Alamat, hanya jika tahap 1 tidak menemukan hasil.
+    $candidateRows = [];
+
+    foreach ($pairs as $pair) {
+        $key = $pair['name'] . '|' . $pair['address'];
+
+        if (!isset($index['by_ktp_name_address'][$key])) {
+            continue;
+        }
+
+        foreach ($index['by_ktp_name_address'][$key] as $internalId => $row) {
             $candidateRows[(int) $internalId] = $row;
         }
     }
