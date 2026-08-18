@@ -1970,7 +1970,81 @@ $dashboardYearOptions = range($dashboardMaxYear, $dashboardMinYear);
         }
     }
 
-    </style>
+    
+
+        /* =========================================================
+           MOBILE RESPONSIVE FIX FINAL — UI ONLY
+           Memperbaiki scroll/touch modal dan kenyamanan layar kecil.
+           Tidak mengubah query, endpoint, role, data, atau alur bisnis.
+           ========================================================= */
+        @media (max-width: 820px) {
+            html, body { max-width: 100%; overflow-x: hidden; }
+            #add-modal, #edit-modal, #message-modal {
+                align-items: flex-start !important;
+                justify-content: center !important;
+                padding: max(8px, env(safe-area-inset-top)) 8px max(8px, env(safe-area-inset-bottom)) !important;
+                overflow: hidden !important;
+            }
+            #add-modal .modal-box, #edit-modal .modal-box, #message-modal .modal-box {
+                width: min(100%, 700px) !important;
+                max-width: 100% !important;
+                height: auto !important;
+                max-height: calc(100dvh - 16px) !important;
+                margin: 0 !important;
+                display: flex !important;
+                flex-direction: column !important;
+                overflow: hidden !important;
+                border-radius: 12px !important;
+            }
+            #edit-modal .modal-box { height: calc(100dvh - 16px) !important; }
+            #add-modal .modal-header, #edit-modal .modal-header, #message-modal .modal-header {
+                flex: 0 0 auto; position: relative; z-index: 3;
+            }
+            #add-modal .modal-scroll-body {
+                flex: 1 1 auto;
+                min-height: 0;
+                overflow-y: auto !important;
+                overflow-x: hidden !important;
+                -webkit-overflow-scrolling: touch;
+                overscroll-behavior: contain;
+                padding: 16px !important;
+                touch-action: pan-y;
+            }
+            #edit-modal .modal-iframe { flex: 1 1 auto; min-height: 0; height: 100%; }
+            #message-modal .message-body, #message-modal .modal-body, #message-modal #message-content {
+                max-width: 100%; overflow-wrap: anywhere;
+            }
+            #add-modal .grid, #edit-modal .grid { flex-direction: column !important; gap: 12px !important; }
+            #add-modal .col, #edit-modal .col {
+                width: 100% !important; min-width: 0 !important; flex: 1 1 auto !important;
+            }
+            #add-modal input, #add-modal select, #add-modal textarea,
+            #edit-modal input, #edit-modal select, #edit-modal textarea {
+                max-width: 100% !important; min-height: 44px; font-size: 16px !important;
+            }
+            #add-modal input[type="file"] { width: 100%; min-width: 0; max-width: 100%; }
+            #add-modal .actions {
+                flex-wrap: wrap; gap: 8px !important; padding-top: 16px !important;
+                padding-bottom: max(4px, env(safe-area-inset-bottom));
+            }
+            #add-modal .actions .btn { min-height: 44px; }
+            #import-add-panel .import-excel-steps { grid-template-columns: 1fr !important; }
+            #import-add-panel .import-excel-template { flex-direction: column !important; align-items: stretch !important; }
+            #import-add-panel .import-excel-download, #import-add-panel .import-excel-submit {
+                width: 100%; justify-content: center; min-height: 44px;
+            }
+        }
+        @media (max-width: 480px) {
+            #add-modal, #edit-modal, #message-modal { padding-left: 6px !important; padding-right: 6px !important; }
+            #add-modal .modal-box, #edit-modal .modal-box, #message-modal .modal-box {
+                max-height: calc(100dvh - 12px) !important;
+            }
+            #edit-modal .modal-box { height: calc(100dvh - 12px) !important; }
+            #add-modal .modal-scroll-body { padding: 14px !important; }
+            #add-modal .actions { flex-direction: column-reverse !important; }
+            #add-modal .actions .btn { width: 100% !important; }
+        }
+</style>
 </head>
 <body>
 
@@ -2082,7 +2156,7 @@ $dashboardYearOptions = range($dashboardMaxYear, $dashboardMinYear);
             <div class="modal-title">Tambah Pelanggan Baru</div>
             <button class="modal-close" onclick="closeAddModal()"><i class="fas fa-times"></i></button>
         </div>
-                    <div style="padding: 20px;">
+                    <div class="modal-scroll-body" style="padding: 20px;">
                         <?php if ($isSuperAdminSalam): ?>
                         <div id="add-customer-tabs" style="display:flex;gap:8px;margin-bottom:18px;background:#f3f6f9;padding:5px;border-radius:10px;">
                             <button type="button" id="tab-add-manual" onclick="switchAddCustomerMode('manual')" style="flex:1;border:0;border-radius:7px;padding:10px 12px;cursor:pointer;font-weight:700;background:#3498db;color:#fff;">

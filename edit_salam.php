@@ -310,7 +310,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update'])) {
         .btn-primary{background:linear-gradient(90deg,var(--accent),#2980b9);color:#fff}.btn-muted{background:#f1f5f9;color:#213}
         .error-message{background:#ffeeee;color:var(--danger);padding:12px;border-radius:6px;margin-bottom:15px;border-left:4px solid var(--danger)}
         @media(max-width:520px){.grid{flex-direction:column}.actions{flex-direction:column}.btn{width:100%}}
-    </style>
+    
+        /* MOBILE RESPONSIVE FIX FINAL — UI ONLY */
+        @media(max-width:520px){
+            html,body{height:100%;min-height:100%;overflow:hidden}
+            .wrap{height:100%;min-height:0;display:block}
+            .card{height:100%;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;touch-action:pan-y}
+            .card__body{padding:16px 14px 22px;min-height:100%;display:flex;flex-direction:column}
+            .grid{flex-direction:column;gap:12px}.col{width:100%;min-width:0}
+            input,select,textarea{max-width:100%;min-height:44px;font-size:16px}
+            input[type="file"]{width:100%;min-width:0;max-width:100%}
+            .actions{flex-direction:column-reverse;gap:8px;padding-bottom:max(6px,env(safe-area-inset-bottom))}
+            .btn{width:100%;min-height:44px;display:flex;align-items:center;justify-content:center}
+            img{max-width:100%;height:auto}
+        }
+</style>
 </head>
 <body>
 <div class="wrap">
