@@ -3,6 +3,7 @@ session_start();
 require_once __DIR__ . '/db_salam.php';
 require_once __DIR__ . '/salam_bootstrap.php';
 require_once __DIR__ . '/pelanggan_detail_helper.php';
+require_once __DIR__ . '/tagihan_periode_helper.php';
 
 salamRequireLogin();
 $canAccessAllWilayah = salamCanAccessAllWilayah();
@@ -19,10 +20,16 @@ foreach (['tarif_langganan', 'tanggal_bayar', 'nominal_dibayar', 'alamat'] as $c
     }
 }
 
-$data = salamFindPelangganById($koneksi, $id);
-if (!$data) {
+$masterData = salamFindPelangganById($koneksi, $id);
+if (!$masterData) {
     exit('Data pelanggan tidak ditemukan atau bukan wilayah akun ini.');
 }
+$requestedPeriode = salamPeriodeYm($_GET['periode'] ?? ($masterData['waktu'] ?? date('Y-m')));
+$data = salamFindTagihanPeriode($koneksi, $id, $requestedPeriode);
+if (!$data) {
+    exit('Tagihan pada periode yang dipilih tidak ditemukan atau bukan wilayah akun ini.');
+}
+$isHistorical = (($data['sumber_data'] ?? '') === 'riwayat');
 if (!salamDetailPelangganTableReady($koneksi)) {
     exit('Database fitur profil pelanggan belum dipasang. Import database_update_billing_pppoe_FINAL.sql terlebih dahulu.');
 }
@@ -57,6 +64,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update'])) {
         $errorMessage = 'NIK hanya boleh berisi angka.';
     }
 
+    if ($isHistorical) {
+        $historyId = (int) ($data['tagihan_riwayat_id'] ?? 0);
+        if ($historyId <= 0) {
+            $errorMessage = 'Riwayat tagihan tidak ditemukan.';
+        } elseif ($tagihanPeriode < 0) {
+            $errorMessage = 'Tagihan tidak boleh negatif.';
+        } elseif (!salamDateIsValid($masaAktifSampai)) {
+            $errorMessage = 'Masa aktif sampai harus berupa tanggal yang valid.';
+        } elseif (salamPeriodeYm($periodeTagihan, $requestedPeriode) !== $requestedPeriode) {
+            $errorMessage = 'Periode riwayat tidak dapat dipindahkan. Pilih periode dari Dashboard.';
+        } else {
+            $nominalRiwayat = $tagihanPeriode > 0
+                ? $tagihanPeriode
+                : (float) ($data['nominal_tagihan_asli'] ?? $data['tarif_langganan'] ?? 0);
+            if ($statusBayar === 'Lunas') {
+                $stmtHistory = $koneksi->prepare("UPDATE tagihan_salam
+                    SET nominal_tagihan=?, tanggal_jatuh_tempo=?, status_bayar='Lunas',
+                        tanggal_bayar=CURDATE(), nominal_dibayar=?
+                    WHERE id=?");
+                $stmtHistory->bind_param('dsdi', $nominalRiwayat, $masaAktifSampai, $nominalRiwayat, $historyId);
+            } else {
+                $stmtHistory = $koneksi->prepare("UPDATE tagihan_salam
+                    SET nominal_tagihan=?, tanggal_jatuh_tempo=?, status_bayar='Belum Lunas',
+                        tanggal_bayar=NULL, nominal_dibayar=NULL
+                    WHERE id=?");
+                $stmtHistory->bind_param('dsi', $nominalRiwayat, $masaAktifSampai, $historyId);
+            }
+            $okHistory = $stmtHistory->execute();
+            $historyError = $stmtHistory->error;
+            $stmtHistory->close();
+            if ($okHistory) {
+                if ($isModal) {
+                    ?>
+                    <!doctype html><html lang="id"><head><meta charset="utf-8"><style>
+                    html,body{height:100%;margin:0;font-family:Segoe UI,Arial;display:grid;place-items:center;background:#f5f7f9}
+                    .msg{background:#fff;padding:22px 28px;border-radius:12px;box-shadow:0 16px 35px rgba(0,0,0,.1);text-align:center}
+                    .msg h3{margin:0 0 6px;color:#2c3e50}.msg p{margin:0;color:#6c757d}
+                    </style></head><body><div class="msg"><h3>Tagihan periode lama berhasil diperbarui</h3><p>Menutup jendela...</p></div>
+                    <script>setTimeout(()=>{window.parent.postMessage(JSON.stringify({action:'close',success:true}),'*')},650)</script>
+                    </body></html>
+                    <?php
+                    exit;
+                }
+                header('Location: dashboard_salam.php');
+                exit;
+            }
+            $errorMessage = 'Riwayat tagihan gagal diperbarui' . ($historyError !== '' ? ': ' . $historyError : '.');
+        }
+    }
+
+    if (!$isHistorical) {
     if (!empty($errorMessage)) {
         // Pesan validasi profil pelanggan sudah ditentukan di atas.
     } elseif ($nama === '' || $paket === '') {
@@ -215,19 +273,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update'])) {
         $errorMessage = 'Data gagal diperbarui' . ($dbError !== '' ? ': ' . $dbError : '.');
     }
 
-    $data['nama'] = $nama;
-    $data['id_pelanggan'] = $idPelanggan;
-    $data['kode_pelanggan'] = $kode;
-    $data['nomor_pelanggan'] = $nomor;
-    $data['alamat'] = $alamat;
-    $data['paket'] = $paket;
-    $data['tarif_langganan'] = $tarif;
-    $data['tagihan'] = $tagihanPeriode;
-    $data['waktu'] = $periodeTagihan;
+    }
+
+    $data['nama'] = $isHistorical ? ($data['nama'] ?? $nama) : $nama;
+    $data['id_pelanggan'] = $isHistorical ? ($data['id_pelanggan'] ?? $idPelanggan) : $idPelanggan;
+    $data['kode_pelanggan'] = $isHistorical ? ($data['kode_pelanggan'] ?? $kode) : $kode;
+    $data['nomor_pelanggan'] = $isHistorical ? ($data['nomor_pelanggan'] ?? $nomor) : $nomor;
+    $data['alamat'] = $isHistorical ? ($data['alamat'] ?? $alamat) : $alamat;
+    $data['paket'] = $isHistorical ? ($data['paket'] ?? $paket) : $paket;
+    $data['tarif_langganan'] = $isHistorical ? ($data['tarif_langganan'] ?? $tagihanPeriode) : $tarif;
+    $data['tagihan'] = $statusBayar === 'Lunas' ? 0 : $tagihanPeriode;
+    $data['waktu'] = $isHistorical ? ($requestedPeriode . '-01') : $periodeTagihan;
     $data['langganan_selesai'] = $masaAktifSampai;
     $data['status_bayar'] = $statusBayar;
-    $detail['nama_ktp'] = $namaKtp ?? ($detail['nama_ktp'] ?? '');
-    $detail['nik'] = $nik ?? ($detail['nik'] ?? '');
+    if (!$isHistorical) $detail['nama_ktp'] = $namaKtp ?? ($detail['nama_ktp'] ?? '');
+    if (!$isHistorical) $detail['nik'] = $nik ?? ($detail['nik'] ?? '');
 }
 ?>
 <!doctype html>
@@ -261,33 +321,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update'])) {
             <?php endif; ?>
 
             <form method="post" enctype="multipart/form-data">
+                <?php if ($isHistorical): ?>
+                <div style="margin-bottom:14px;padding:10px 12px;border-radius:9px;background:#eef6ff;border:1px solid #cfe4fb;color:#315b7d;font-size:13px;line-height:1.45;">
+                    <b>Periode lama: <?= htmlspecialchars(salamBulananIndonesia($requestedPeriode . '-01', false)); ?></b><br>
+                    Data pelanggan ditampilkan sebagai referensi. Yang dapat diperbarui di halaman ini hanya nominal tagihan, masa aktif, dan status pembayaran periode tersebut.
+                </div>
+                <?php endif; ?>
                 <div style="font-weight:700;color:#2c3e50;margin-bottom:10px;">Data Pelanggan</div>
                 <div class="grid">
                     <div class="col">
                         <label class="small">Nama</label>
-                        <input type="text" name="nama" value="<?= htmlspecialchars((string) $data['nama']); ?>" required>
+                        <input type="text" name="nama" <?= $isHistorical ? 'readonly' : ''; ?> value="<?= htmlspecialchars((string) $data['nama']); ?>" required>
                     </div>
                     <div class="col">
                         <label class="small">ID Pelanggan</label>
-                        <input type="text" name="id_pelanggan" value="<?= htmlspecialchars((string) ($data['id_pelanggan'] ?? '')); ?>">
+                        <input type="text" name="id_pelanggan" <?= $isHistorical ? 'readonly' : ''; ?> value="<?= htmlspecialchars((string) ($data['id_pelanggan'] ?? '')); ?>">
                     </div>
                 </div>
 
                 <div class="grid" style="margin-top:12px">
                     <div class="col">
                         <label class="small">Nomor WhatsApp</label>
-                        <input type="text" name="nomor_pelanggan" value="<?= htmlspecialchars((string) ($data['nomor_pelanggan'] ?? '')); ?>" placeholder="08... / 62...">
+                        <input type="text" name="nomor_pelanggan" <?= $isHistorical ? 'readonly' : ''; ?> value="<?= htmlspecialchars((string) ($data['nomor_pelanggan'] ?? '')); ?>" placeholder="08... / 62...">
                     </div>
                     <div class="col">
                         <label class="small">Kode Pelanggan</label>
-                        <input type="text" name="kode_pelanggan" value="<?= htmlspecialchars((string) ($data['kode_pelanggan'] ?? '')); ?>">
+                        <input type="text" name="kode_pelanggan" <?= $isHistorical ? 'readonly' : ''; ?> value="<?= htmlspecialchars((string) ($data['kode_pelanggan'] ?? '')); ?>">
                     </div>
                 </div>
 
                 <div class="grid" style="margin-top:12px">
                     <div class="col">
                         <label class="small">Alamat</label>
-                        <input type="text" name="alamat" list="alamat-salam-options" autocomplete="off" value="<?= htmlspecialchars($canAccessAllWilayah ? salamNamaWilayahTampilan((string) ($data['alamat'] ?? '')) : salamWilayahLogin()); ?>" placeholder="Pilih alamat atau ketik manual" <?= $canAccessAllWilayah ? '' : 'readonly'; ?>>
+                        <input type="text" name="alamat" list="alamat-salam-options" autocomplete="off" value="<?= htmlspecialchars($canAccessAllWilayah ? salamNamaWilayahTampilan((string) ($data['alamat'] ?? '')) : salamWilayahLogin()); ?>" placeholder="Pilih alamat atau ketik manual" <?= ($canAccessAllWilayah && !$isHistorical) ? '' : 'readonly'; ?>>
                         <datalist id="alamat-salam-options">
                             <?php foreach (array_values(salamDaftarWilayahResmi()) as $wilayahOption): ?>
                                 <option value="<?= htmlspecialchars($wilayahOption); ?>"></option>
@@ -296,7 +362,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update'])) {
                     </div>
                     <div class="col">
                         <label class="small">Paket</label>
-                        <input type="text" name="paket" value="<?= htmlspecialchars((string) ($data['paket'] ?? '')); ?>" required>
+                        <input type="text" name="paket" <?= $isHistorical ? 'readonly' : ''; ?> value="<?= htmlspecialchars((string) ($data['paket'] ?? '')); ?>" required>
                     </div>
                 </div>
 
@@ -305,11 +371,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update'])) {
                     <div class="grid">
                         <div class="col">
                             <label class="small">Nama sesuai KTP</label>
-                            <input type="text" name="nama_ktp" value="<?= htmlspecialchars((string) ($detail['nama_ktp'] ?? '')); ?>">
+                            <input type="text" name="nama_ktp" <?= $isHistorical ? 'readonly' : ''; ?> value="<?= htmlspecialchars((string) ($detail['nama_ktp'] ?? '')); ?>">
                         </div>
                         <div class="col">
                             <label class="small">NIK</label>
-                            <input type="text" name="nik" inputmode="numeric" maxlength="32" value="<?= htmlspecialchars((string) ($detail['nik'] ?? '')); ?>">
+                            <input type="text" name="nik" <?= $isHistorical ? 'readonly' : ''; ?> inputmode="numeric" maxlength="32" value="<?= htmlspecialchars((string) ($detail['nik'] ?? '')); ?>">
                         </div>
                     </div>
                     <div class="grid" style="margin-top:12px">
@@ -326,7 +392,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update'])) {
                                     </div>
                                 <?php endif; ?>
                             </div>
-                            <input type="file" name="foto_rumah" accept="image/jpeg,image/png,image/webp">
+                            <input type="file" name="foto_rumah" accept="image/jpeg,image/png,image/webp" <?= $isHistorical ? 'disabled' : ''; ?>>
                             <div class="note">
                                 Jika tidak memilih foto baru, foto lama tetap digunakan. Maksimal 5 MB (JPG/PNG/WEBP).
                             </div>
@@ -341,7 +407,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update'])) {
                 <div class="grid" style="margin-top:12px">
                     <div class="col">
                         <label class="small">Periode Tagihan</label>
-                        <input type="date" name="waktu" value="<?= htmlspecialchars((string) ($data['waktu'] ?? '')); ?>" required>
+                        <input type="date" name="waktu" value="<?= htmlspecialchars((string) ($data['waktu'] ?? '')); ?>" required <?= $isHistorical ? 'readonly' : ''; ?>>
                         
                     </div>
                     <div class="col">

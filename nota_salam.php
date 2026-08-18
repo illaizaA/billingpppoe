@@ -5,6 +5,7 @@ date_default_timezone_set('Asia/Jakarta');
 session_start();
 require_once __DIR__ . '/db_salam.php';
 require_once __DIR__ . '/helpers_salam.php';
+require_once __DIR__ . '/tagihan_periode_helper.php';
 salamRequireLogin();
 
 /* Ukuran thermal yang sama seperti file sumber: 57 mm, 58 mm, dan 80 mm. */
@@ -19,14 +20,15 @@ $ukuranHalaman = $modeCetak === 'a4' ? 'A4 portrait' : $lebarKertas . ' auto';
 
 $id = (int) ($_GET['id'] ?? 0);
 if ($id <= 0) exit('ID nota tidak valid.');
-$data = salamFindPelangganById($koneksi, $id);
-if (!$data) exit('Data pelanggan tidak ditemukan atau bukan wilayah akun ini.');
+$periode = salamPeriodeYm($_GET['periode'] ?? date('Y-m'));
+$data = salamFindTagihanPeriode($koneksi, $id, $periode);
+if (!$data) exit('Tagihan pada periode yang dipilih tidak ditemukan atau bukan wilayah akun ini.');
 
 $isLunas = ($data['status_bayar'] ?? '') === 'Lunas';
 $judulNota = $isLunas ? 'BUKTI PEMBAYARAN' : 'NOTA TAGIHAN';
 $subjudul = $isLunas ? 'Bukti pembayaran pelanggan' : 'Informasi tagihan pelanggan';
 $nominal = $isLunas ? (float) ($data['nominal_dibayar'] ?? $data['tarif_langganan'] ?? 0) : (float) ($data['tagihan'] ?? 0);
-$nomorNota = !empty($data['nomor_invoice']) ? (string) $data['nomor_invoice'] : salamKodeWilayah($data['alamat'] ?? '') . '-' . date('Ym') . '-' . str_pad((string)$data['id'],5,'0',STR_PAD_LEFT);
+$nomorNota = !empty($data['nomor_invoice']) ? (string) $data['nomor_invoice'] : salamKodeWilayah($data['alamat'] ?? '') . '-' . str_replace('-', '', $periode) . '-' . str_pad((string)$id,5,'0',STR_PAD_LEFT);
 $tanggalCetak = salamTanggalWaktuIndonesia();
 $periodeTagihan = salamBulananIndonesia($data['waktu'] ?? null, false);
 $masaAktif = salamBulananIndonesia($data['langganan_selesai'] ?? null, true);

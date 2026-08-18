@@ -7,6 +7,24 @@ $isSuperAdminSalam = salamIsSuperAdmin();
 $canAccessAllWilayah = salamCanAccessAllWilayah();
 $dashboardWilayah = $canAccessAllWilayah ? 'SEMUA WILAYAH' : salamWilayahLogin();
 $alamatWilayahResmi = array_values(salamDaftarWilayahResmi());
+$dashboardBulanOptions = [
+    '01'=>'Januari','02'=>'Februari','03'=>'Maret','04'=>'April','05'=>'Mei','06'=>'Juni',
+    '07'=>'Juli','08'=>'Agustus','09'=>'September','10'=>'Oktober','11'=>'November','12'=>'Desember'
+];
+$dashboardCurrentYear = (int) date('Y');
+$dashboardMinYear = $dashboardCurrentYear - 3;
+$dashboardMaxYear = $dashboardCurrentYear + 1;
+$yearRangeResult = $koneksi->query("SELECT MIN(y) min_year, MAX(y) max_year FROM (
+    SELECT YEAR(waktu) y FROM pelanggan_salam WHERE waktu IS NOT NULL
+    UNION ALL
+    SELECT YEAR(periode) y FROM tagihan_salam WHERE periode IS NOT NULL
+) z");
+if ($yearRangeResult instanceof mysqli_result) {
+    $yr = $yearRangeResult->fetch_assoc();
+    if (!empty($yr['min_year'])) $dashboardMinYear = min($dashboardMinYear, (int)$yr['min_year']);
+    if (!empty($yr['max_year'])) $dashboardMaxYear = max($dashboardMaxYear, (int)$yr['max_year']);
+}
+$dashboardYearOptions = range($dashboardMaxYear, $dashboardMinYear);
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -2008,14 +2026,14 @@ $alamatWilayahResmi = array_values(salamDaftarWilayahResmi());
                 <div class="icon bg-success"><i class="fas fa-check-circle"></i></div>
                 <div class="stat-info">
                     <h3 id="tagihan-lunas">...</h3>
-                    <p>Lunas Bulan Ini</p>
+                    <p id="label-lunas-periode">Lunas Bulan Ini</p>
                 </div>
             </div>
             <div class="stat-card" data-filter="belum lunas" onclick="filterByStatus('belum lunas')">
                 <div class="icon bg-danger"><i class="fas fa-clock"></i></div>
                 <div class="stat-info">
                     <h3 id="tagihan-belum-lunas">...</h3>
-                    <p>Belum Lunas Bulan Ini</p>
+                    <p id="label-belum-lunas-periode">Belum Lunas Bulan Ini</p>
                 </div>
             </div>
         </div>
@@ -2024,6 +2042,22 @@ $alamatWilayahResmi = array_values(salamDaftarWilayahResmi());
     <h2><i class="fas fa-list"></i> Daftar Billing Pelanggan</h2>
     
         <div class="table-actions">
+                <div class="search-box" style="min-width:150px;">
+                    <i class="fas fa-calendar-alt"></i>
+                    <select id="periode-bulan" aria-label="Bulan tagihan" style="width:100%;border:0;outline:0;background:transparent;padding:8px 4px;">
+                        <?php foreach ($dashboardBulanOptions as $bulanKey => $bulanLabel): ?>
+                            <option value="<?= htmlspecialchars($bulanKey); ?>" <?= $bulanKey === date('m') ? 'selected' : ''; ?>><?= htmlspecialchars($bulanLabel); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="search-box" style="min-width:115px;">
+                    <i class="fas fa-calendar"></i>
+                    <select id="periode-tahun" aria-label="Tahun tagihan" style="width:100%;border:0;outline:0;background:transparent;padding:8px 4px;">
+                        <?php foreach ($dashboardYearOptions as $tahunOption): ?>
+                            <option value="<?= (int)$tahunOption; ?>" <?= (int)$tahunOption === (int)date('Y') ? 'selected' : ''; ?>><?= (int)$tahunOption; ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
                 <?php if ($canAccessAllWilayah): ?>
                 <div class="search-box" style="min-width:220px;">
                     <i class="fas fa-map-marker-alt"></i>
@@ -2228,7 +2262,7 @@ $alamatWilayahResmi = array_values(salamDaftarWilayahResmi());
     <script>
         // Modal logic (unchanged)
         function createEditModalIfNeeded() { if (document.getElementById('edit-modal')) return; const modal = document.createElement('div'); modal.id = 'edit-modal'; modal.innerHTML = `<div class="backdrop"></div><div class="modal-box"><div class="modal-header"><div class="modal-title">Edit Tagihan</div><button class="modal-close" onclick="closeEditModal()"><i class="fas fa-times"></i></button></div><iframe id="edit-iframe" class="modal-iframe" src="about:blank"></iframe></div>`; modal.querySelector('.backdrop').addEventListener('click', closeEditModal); document.body.appendChild(modal); document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeEditModal(); }); }
-        function openEditModal(id) { createEditModalIfNeeded(); const modal = document.getElementById('edit-modal'); const iframe = document.getElementById('edit-iframe'); iframe.src = `edit_salam.php?id=${id}&modal=1`; modal.classList.add('open'); }
+        function openEditModal(id, periode = currentPeriode) { createEditModalIfNeeded(); const modal = document.getElementById('edit-modal'); const iframe = document.getElementById('edit-iframe'); iframe.src = `edit_salam.php?id=${id}&periode=${encodeURIComponent(periode)}&modal=1`; modal.classList.add('open'); }
         function closeEditModal() { const modal = document.getElementById('edit-modal'); if (!modal) return; modal.classList.remove('open'); setTimeout(() => { document.getElementById('edit-iframe').src = 'about:blank'; loadData(currentPage, currentSearch, currentFilter); loadStats(); }, 320); }
         window.addEventListener('message', (e) => { try { const data = JSON.parse(e.data); if (data && data.action === 'close') closeEditModal(); } catch (err) {} });
         
@@ -2238,6 +2272,7 @@ $alamatWilayahResmi = array_values(salamDaftarWilayahResmi());
         let currentSearch = "";
         let currentFilter = "all"; // Filter status
         let currentWilayah = "all"; // Khusus Super Admin
+        let currentPeriode = <?= json_encode(date('Y-m')); ?>; // Periode tagihan yang sedang dikelola
 
         // Fungsi BARU untuk menangani filter
         function filterByStatus(status) {
@@ -2255,7 +2290,7 @@ $alamatWilayahResmi = array_values(salamDaftarWilayahResmi());
 
         function loadStats() {
             // Statistik lama tetap memakai endpoint lama.
-            fetch(`get_stats_salam.php?wilayah=${encodeURIComponent(currentWilayah)}`)
+            fetch(`get_stats_salam.php?wilayah=${encodeURIComponent(currentWilayah)}&periode=${encodeURIComponent(currentPeriode)}`)
                 .then(response => response.json())
                 .then(data => {
                     document.getElementById('total-pelanggan').innerText = data.total_pelanggan;
@@ -2291,7 +2326,7 @@ $alamatWilayahResmi = array_values(salamDaftarWilayahResmi());
             document.getElementById('table-container').innerHTML = `<div style="padding: 40px; text-align: center; color: var(--gray);"><i class="fas fa-spinner fa-spin fa-2x"></i></div>`;
             
             // Tambahkan parameter &filter= ke URL fetch
-            const fetchUrl = `get_data_salam.php?page=${page}&limit=${itemsPerPage}&search=${encodeURIComponent(search)}&filter=${encodeURIComponent(filter)}&wilayah=${encodeURIComponent(currentWilayah)}`;
+            const fetchUrl = `get_data_salam.php?page=${page}&limit=${itemsPerPage}&search=${encodeURIComponent(search)}&filter=${encodeURIComponent(filter)}&wilayah=${encodeURIComponent(currentWilayah)}&periode=${encodeURIComponent(currentPeriode)}`;
 
             fetch(fetchUrl)
                 .then(response => response.json())
@@ -2304,14 +2339,14 @@ $alamatWilayahResmi = array_values(salamDaftarWilayahResmi());
                 });
         }
         
-        function updateStatus(id, currentStatus) {
+        function updateStatus(id, currentStatus, periode = currentPeriode) {
             const newStatus = currentStatus === 'Lunas' ? 'Belum Lunas' : 'Lunas';
             Swal.fire({
                 title: 'Konfirmasi Perubahan Status', text: `Anda yakin ingin mengubah status menjadi "${newStatus}"?`, icon: 'warning', showCancelButton: true,
                 confirmButtonColor: '#3085d6', cancelButtonColor: '#d33', confirmButtonText: 'Ya, ubah!', cancelButtonText: 'Batal'
             }).then((result) => {
                 if (result.isConfirmed) {
-                    fetch('update_status_salam.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id, status: newStatus }) })
+                    fetch('update_status_salam.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id, status: newStatus, periode: periode }) })
                     .then(response => response.json())
                     .then(data => {
                         if (data.success) {
@@ -2410,7 +2445,81 @@ $alamatWilayahResmi = array_values(salamDaftarWilayahResmi());
             return /^62\d{8,14}$/.test(number) ? number : '';
         }
 
-        function sendReceipt(id, tujuan, currentStatus) {
+        function periodeLabelDashboard(periode) {
+            const [tahun, bulan] = String(periode || '').split('-');
+            const namaBulan = ['','Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+            return `${namaBulan[Number(bulan)] || bulan} ${tahun || ''}`.trim();
+        }
+
+        function syncPeriodFromSelectors(reload = true) {
+            const bulan = document.getElementById('periode-bulan');
+            const tahun = document.getElementById('periode-tahun');
+            if (!bulan || !tahun) return;
+            currentPeriode = `${tahun.value}-${bulan.value}`;
+            document.getElementById('label-lunas-periode').textContent = `Lunas ${periodeLabelDashboard(currentPeriode)}`;
+            document.getElementById('label-belum-lunas-periode').textContent = `Belum Lunas ${periodeLabelDashboard(currentPeriode)}`;
+            if (reload) {
+                currentPage = 1;
+                loadData(currentPage, currentSearch, currentFilter);
+                loadStats();
+            }
+        }
+
+        function openWhatsAppTagihan(nomor, pesan) {
+            const wa = normaliseWhatsAppNumber(nomor);
+            if (!wa) {
+                Swal.fire({icon:'error',title:'Nomor WhatsApp tidak valid',text:'Isi nomor pelanggan terlebih dahulu.'});
+                return;
+            }
+            window.open('https://wa.me/' + wa + '?text=' + encodeURIComponent(pesan), '_blank');
+        }
+
+        function openTagihanChoice(button) {
+            const wa = button.dataset.wa || '';
+            const pesanPeriode = decodeURIComponent(button.dataset.currentMessage || '');
+            const pesanSemua = decodeURIComponent(button.dataset.allMessage || '');
+            const jumlahTunggakan = Number(button.dataset.arrearsCount || 0);
+            const periodeIniBelum = button.dataset.currentUnpaid === '1';
+            const labelPeriode = button.dataset.periodLabel || periodeLabelDashboard(currentPeriode);
+
+            if (jumlahTunggakan <= 0) {
+                Swal.fire({icon:'info',title:'Tidak ada tunggakan',text:'Pelanggan ini tidak memiliki tagihan berstatus Belum Lunas.'});
+                return;
+            }
+            if (jumlahTunggakan === 1 && periodeIniBelum) {
+                openWhatsAppTagihan(wa, pesanPeriode);
+                return;
+            }
+            if (!periodeIniBelum) {
+                Swal.fire({
+                    title:'Periode ini sudah lunas',
+                    html:`${labelPeriode} sudah lunas.<br><br>Pelanggan masih memiliki <b>${jumlahTunggakan} periode tunggakan</b>. Kirim rekap semua tunggakan?`,
+                    icon:'info', showCancelButton:true,
+                    confirmButtonText:'Kirim Semua Tunggakan', cancelButtonText:'Batal'
+                }).then(r => { if (r.isConfirmed) openWhatsAppTagihan(wa, pesanSemua); });
+                return;
+            }
+            Swal.fire({
+                title:'Kirim Tagihan',
+                html:`<div style="text-align:left;line-height:1.6">
+                    <label style="display:block;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:8px;cursor:pointer">
+                        <input type="radio" name="tagihan-scope" value="periode" checked> <b>Periode yang sedang dibuka</b><br>
+                        <span style="margin-left:22px;color:#64748b">${labelPeriode}</span>
+                    </label>
+                    <label style="display:block;padding:10px;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer">
+                        <input type="radio" name="tagihan-scope" value="semua"> <b>Semua tunggakan</b><br>
+                        <span style="margin-left:22px;color:#64748b">${jumlahTunggakan} periode belum lunas</span>
+                    </label>
+                </div>`,
+                showCancelButton:true, confirmButtonText:'Lanjut WhatsApp', cancelButtonText:'Batal',
+                preConfirm:() => document.querySelector('input[name="tagihan-scope"]:checked')?.value || 'periode'
+            }).then(r => {
+                if (!r.isConfirmed) return;
+                openWhatsAppTagihan(wa, r.value === 'semua' ? pesanSemua : pesanPeriode);
+            });
+        }
+
+        function sendReceipt(id, tujuan, currentStatus, periode = currentPeriode) {
             const nomorWhatsApp = normaliseWhatsAppNumber(tujuan);
             if (!nomorWhatsApp) {
                 Swal.fire({icon:'error', title:'Nomor WhatsApp tidak valid', text:'Isi nomor pelanggan dengan format 08xxxxxxxxxx atau 62xxxxxxxxxx terlebih dahulu.'});
@@ -2431,7 +2540,7 @@ $alamatWilayahResmi = array_values(salamDaftarWilayahResmi());
                     whatsappWindow.document.write('<!doctype html><html><head><title>Membuka WhatsApp</title></head><body style="font-family:Arial,sans-serif;padding:24px">Membuka chat WhatsApp pelanggan...</body></html>');
                     whatsappWindow.document.close();
                 }
-                fetch('update_status_salam.php', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:id,status:'Lunas'})})
+                fetch('update_status_salam.php', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:id,status:'Lunas',periode:periode})})
                     .then(r => r.json())
                     .then(data => {
                         if (!data.success) throw new Error(data.message || 'Status gagal diperbarui.');
@@ -2460,6 +2569,12 @@ $alamatWilayahResmi = array_values(salamDaftarWilayahResmi());
                     loadData(currentPage, searchInput.value.trim(), currentFilter);
                 }, 300);
             });
+            const periodeBulan = document.getElementById('periode-bulan');
+            const periodeTahun = document.getElementById('periode-tahun');
+            if (periodeBulan) periodeBulan.addEventListener('change', () => syncPeriodFromSelectors(true));
+            if (periodeTahun) periodeTahun.addEventListener('change', () => syncPeriodFromSelectors(true));
+            syncPeriodFromSelectors(false);
+
             const wilayahSelect = document.getElementById('wilayah-filter');
             if (wilayahSelect) {
                 wilayahSelect.addEventListener('change', function() {

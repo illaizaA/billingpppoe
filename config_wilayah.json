@@ -67,5 +67,19 @@
         "metode_pembayaran": [],
         "nomor_whatsapp": "",
         "catatan_pembayaran": "Konfirmasikan pembayaran kepada admin wilayah WADUK."
+    },
+    "banyuwangi": {
+        "wilayah": "BANYUWANGI",
+        "nama_layanan": "Billing BANYUWANGI / UKOOMED",
+        "metode_pembayaran": [
+            {
+                "jenis": "ewallet",
+                "nama": "DANA",
+                "nomor": "0985678978",
+                "atas_nama": "Rudi"
+            }
+        ],
+        "nomor_whatsapp": "6282338635691",
+        "catatan_pembayaran": "Konfirmasikan pembayaran kepada admin wilayah BANYUWANGI."
     }
 }
