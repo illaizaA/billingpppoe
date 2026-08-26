@@ -30,18 +30,31 @@ $bulanOptions = [
     '12' => 'Desember',
 ];
 
-$rawBulan = trim($_GET['bulan'] ?? '');
-$rawTahun = trim($_GET['tahun'] ?? '');
-if (preg_match('/^(0?[1-9]|1[0-2])$/', $rawBulan) && preg_match('/^\d{4}$/', $rawTahun)) {
-    $periode = sprintf('%04d-%02d', (int) $rawTahun, (int) $rawBulan);
-} else {
-    $periode = trim($_GET['periode'] ?? date('Y-m'));
-    if (!preg_match('/^\d{4}-\d{2}$/', $periode)) {
-        $periode = date('Y-m');
-    }
+$periode = trim($_GET['periode'] ?? date('Y-m'));
+if (!preg_match('/^\d{4}-\d{2}$/', $periode)) {
+    $periode = date('Y-m');
 }
-$selectedTahun = (int) substr($periode, 0, 4);
-$selectedBulan = substr($periode, 5, 2);
+
+$rawBulanAwal = trim($_GET['bulan_awal'] ?? substr($periode, 5, 2));
+$rawTahunAwal = trim($_GET['tahun_awal'] ?? substr($periode, 0, 4));
+$rawBulanAkhir = trim($_GET['bulan_akhir'] ?? substr($periode, 5, 2));
+$rawTahunAkhir = trim($_GET['tahun_akhir'] ?? substr($periode, 0, 4));
+
+$periodeAwal = (preg_match('/^(0?[1-9]|1[0-2])$/', $rawBulanAwal) && preg_match('/^\d{4}$/', $rawTahunAwal))
+    ? sprintf('%04d-%02d', (int) $rawTahunAwal, (int) $rawBulanAwal)
+    : $periode;
+$periodeAkhir = (preg_match('/^(0?[1-9]|1[0-2])$/', $rawBulanAkhir) && preg_match('/^\d{4}$/', $rawTahunAkhir))
+    ? sprintf('%04d-%02d', (int) $rawTahunAkhir, (int) $rawBulanAkhir)
+    : $periode;
+
+if (strcmp($periodeAwal, $periodeAkhir) > 0) {
+    [$periodeAwal, $periodeAkhir] = [$periodeAkhir, $periodeAwal];
+}
+
+$selectedTahunAwal = (int) substr($periodeAwal, 0, 4);
+$selectedBulanAwal = substr($periodeAwal, 5, 2);
+$selectedTahunAkhir = (int) substr($periodeAkhir, 0, 4);
+$selectedBulanAkhir = substr($periodeAkhir, 5, 2);
 $statusBayar = $_GET['status_bayar'] ?? 'all';
 $statusPelanggan = $_GET['status_pelanggan'] ?? 'all';
 $alamatFilter = trim($_GET['alamat'] ?? 'all');
@@ -87,8 +100,8 @@ if ($alamatResult instanceof mysqli_result) {
 }
 
 $currentYear = (int) date('Y');
-$minYear = min($currentYear - 1, $selectedTahun);
-$maxYear = max($currentYear + 1, $selectedTahun);
+$minYear = min($currentYear - 1, $selectedTahunAwal, $selectedTahunAkhir);
+$maxYear = max($currentYear + 1, $selectedTahunAwal, $selectedTahunAkhir);
 $yearResult = $koneksi->query("
     SELECT MIN(tahun) AS min_year, MAX(tahun) AS max_year
     FROM (
@@ -175,7 +188,7 @@ $baseLaporanSql = "
         p.nomor_invoice,
         'berjalan' AS sumber_data
     FROM pelanggan_salam p
-    WHERE DATE_FORMAT(p.waktu, '%Y-%m') = ?
+    WHERE DATE_FORMAT(p.waktu, '%Y-%m') BETWEEN ? AND ?
 
     UNION ALL
 
@@ -201,7 +214,7 @@ $baseLaporanSql = "
         'riwayat' AS sumber_data
     FROM tagihan_salam t
     LEFT JOIN pelanggan_salam p ON p.id = t.pelanggan_id
-    WHERE DATE_FORMAT(t.periode, '%Y-%m') = ?
+    WHERE DATE_FORMAT(t.periode, '%Y-%m') BETWEEN ? AND ?
       AND NOT EXISTS (
           SELECT 1
           FROM pelanggan_salam p_berjalan
@@ -211,8 +224,8 @@ $baseLaporanSql = "
 ";
 
 $conditions = ['1 = 1'];
-$types = 'ss';
-$params = [$periode, $periode];
+$types = 'ssss';
+$params = [$periodeAwal, $periodeAkhir, $periodeAwal, $periodeAkhir];
 
 if (in_array($statusBayar, ['Lunas', 'Belum Lunas'], true)) {
     $conditions[] = 'status_bayar = ?';
@@ -240,7 +253,7 @@ if ($alamatFilter !== 'all' && $alamatFilter !== '') {
 }
 
 $where = 'WHERE ' . implode(' AND ', $conditions);
-$sql = "SELECT * FROM ({$baseLaporanSql}) AS laporan {$where} ORDER BY pelanggan_id ASC, id ASC";
+$sql = "SELECT * FROM ({$baseLaporanSql}) AS laporan {$where} ORDER BY waktu ASC, alamat ASC, nama ASC, pelanggan_id ASC, id ASC";
 $stmt = $koneksi->prepare($sql);
 if (!$stmt) {
     die('Query laporan multiwilayah gagal disiapkan: ' . $koneksi->error);
@@ -280,7 +293,12 @@ foreach ($rows as $row) {
 }
 
 
-$periodeLabel = salamBulananIndonesia($periode . '-01', false);
+if ($periodeAwal === $periodeAkhir) {
+    $periodeLabel = salamBulananIndonesia($periodeAwal . '-01', false);
+} else {
+    $periodeLabel = salamBulananIndonesia($periodeAwal . '-01', false)
+        . ' - ' . salamBulananIndonesia($periodeAkhir . '-01', false);
+}
 
 $allowedPerPages = [10, 25, 50, 100];
 $perPageRaw = $_GET['per_page'] ?? '10';
@@ -315,9 +333,10 @@ if ($perPage === 'all') {
 }
 
 $filterParams = [
-    'periode' => $periode,
-    'bulan' => $selectedBulan,
-    'tahun' => $selectedTahun,
+    'bulan_awal' => $selectedBulanAwal,
+    'tahun_awal' => $selectedTahunAwal,
+    'bulan_akhir' => $selectedBulanAkhir,
+    'tahun_akhir' => $selectedTahunAkhir,
     'status_bayar' => $statusBayar,
     'status_pelanggan' => $statusPelanggan,
     'alamat' => $alamatFilter,
@@ -329,9 +348,10 @@ $pageUrl = function (int $page) use ($filterParams): string {
 };
 
 $exportQuery = http_build_query([
-    'periode' => $periode,
-    'bulan' => $selectedBulan,
-    'tahun' => $selectedTahun,
+    'bulan_awal' => $selectedBulanAwal,
+    'tahun_awal' => $selectedTahunAwal,
+    'bulan_akhir' => $selectedBulanAkhir,
+    'tahun_akhir' => $selectedTahunAkhir,
     'status_bayar' => $statusBayar,
     'status_pelanggan' => $statusPelanggan,
     'alamat' => $alamatFilter,
@@ -440,7 +460,7 @@ $exportQuery = http_build_query([
         }
         .filter-grid {
             display: grid;
-            grid-template-columns: 1.25fr .95fr .95fr 1fr 1.2fr auto;
+            grid-template-columns: 1fr 1.25fr 1.25fr .9fr .9fr 1fr 1.15fr auto;
             gap: 11px;
             align-items: end;
         }
@@ -990,16 +1010,31 @@ $exportQuery = http_build_query([
                 <input type="hidden" name="page" value="1">
                 <div class="filter-grid">
                     <div>
-                        <label>Periode Bulan</label>
+                        <label>Dari Periode</label>
                         <div class="period-selects">
-                            <select id="bulan" name="bulan" aria-label="Pilih bulan laporan">
+                            <select id="bulan_awal" name="bulan_awal" aria-label="Pilih bulan awal">
                                 <?php foreach ($bulanOptions as $bulanValue => $bulanName): ?>
-                                    <option value="<?= htmlspecialchars($bulanValue); ?>" <?= $selectedBulan === $bulanValue ? 'selected' : ''; ?>><?= htmlspecialchars($bulanName); ?></option>
+                                    <option value="<?= htmlspecialchars($bulanValue); ?>" <?= $selectedBulanAwal === $bulanValue ? 'selected' : ''; ?>><?= htmlspecialchars($bulanName); ?></option>
                                 <?php endforeach; ?>
                             </select>
-                            <select id="tahun" name="tahun" aria-label="Pilih tahun laporan">
+                            <select id="tahun_awal" name="tahun_awal" aria-label="Pilih tahun awal">
                                 <?php foreach ($yearOptions as $tahunOption): ?>
-                                    <option value="<?= (int) $tahunOption; ?>" <?= $selectedTahun === (int) $tahunOption ? 'selected' : ''; ?>><?= (int) $tahunOption; ?></option>
+                                    <option value="<?= (int) $tahunOption; ?>" <?= $selectedTahunAwal === (int) $tahunOption ? 'selected' : ''; ?>><?= (int) $tahunOption; ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <label>Sampai Periode</label>
+                        <div class="period-selects">
+                            <select id="bulan_akhir" name="bulan_akhir" aria-label="Pilih bulan akhir">
+                                <?php foreach ($bulanOptions as $bulanValue => $bulanName): ?>
+                                    <option value="<?= htmlspecialchars($bulanValue); ?>" <?= $selectedBulanAkhir === $bulanValue ? 'selected' : ''; ?>><?= htmlspecialchars($bulanName); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <select id="tahun_akhir" name="tahun_akhir" aria-label="Pilih tahun akhir">
+                                <?php foreach ($yearOptions as $tahunOption): ?>
+                                    <option value="<?= (int) $tahunOption; ?>" <?= $selectedTahunAkhir === (int) $tahunOption ? 'selected' : ''; ?>><?= (int) $tahunOption; ?></option>
                                 <?php endforeach; ?>
                             </select>
                         </div>
@@ -1056,9 +1091,10 @@ $exportQuery = http_build_query([
                 </div>
                 <div class="table-actions">
                     <form method="get" class="rows-control">
-                        <input type="hidden" name="periode" value="<?= htmlspecialchars($periode); ?>">
-                        <input type="hidden" name="bulan" value="<?= htmlspecialchars($selectedBulan); ?>">
-                        <input type="hidden" name="tahun" value="<?= htmlspecialchars((string) $selectedTahun); ?>">
+                        <input type="hidden" name="bulan_awal" value="<?= htmlspecialchars($selectedBulanAwal); ?>">
+                        <input type="hidden" name="tahun_awal" value="<?= htmlspecialchars((string) $selectedTahunAwal); ?>">
+                        <input type="hidden" name="bulan_akhir" value="<?= htmlspecialchars($selectedBulanAkhir); ?>">
+                        <input type="hidden" name="tahun_akhir" value="<?= htmlspecialchars((string) $selectedTahunAkhir); ?>">
                         <input type="hidden" name="status_bayar" value="<?= htmlspecialchars($statusBayar); ?>">
                         <input type="hidden" name="status_pelanggan" value="<?= htmlspecialchars($statusPelanggan); ?>">
                         <input type="hidden" name="alamat" value="<?= htmlspecialchars($alamatFilter); ?>">
@@ -1209,5 +1245,9 @@ $exportQuery = http_build_query([
             <?php endif; ?>
         </div>
     </div>
+
+    <script>
+    </script>
+
 </body>
 </html>

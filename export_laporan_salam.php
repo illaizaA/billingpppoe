@@ -20,6 +20,23 @@ $periode = trim($_GET['periode'] ?? date('Y-m'));
 if (!preg_match('/^\d{4}-\d{2}$/', $periode)) {
     $periode = date('Y-m');
 }
+
+$rawBulanAwal = trim($_GET['bulan_awal'] ?? substr($periode, 5, 2));
+$rawTahunAwal = trim($_GET['tahun_awal'] ?? substr($periode, 0, 4));
+$rawBulanAkhir = trim($_GET['bulan_akhir'] ?? substr($periode, 5, 2));
+$rawTahunAkhir = trim($_GET['tahun_akhir'] ?? substr($periode, 0, 4));
+
+$periodeAwal = (preg_match('/^(0?[1-9]|1[0-2])$/', $rawBulanAwal) && preg_match('/^\d{4}$/', $rawTahunAwal))
+    ? sprintf('%04d-%02d', (int) $rawTahunAwal, (int) $rawBulanAwal)
+    : $periode;
+$periodeAkhir = (preg_match('/^(0?[1-9]|1[0-2])$/', $rawBulanAkhir) && preg_match('/^\d{4}$/', $rawTahunAkhir))
+    ? sprintf('%04d-%02d', (int) $rawTahunAkhir, (int) $rawBulanAkhir)
+    : $periode;
+
+if (strcmp($periodeAwal, $periodeAkhir) > 0) {
+    [$periodeAwal, $periodeAkhir] = [$periodeAkhir, $periodeAwal];
+}
+
 $statusBayar = $_GET['status_bayar'] ?? 'all';
 $statusPelanggan = $_GET['status_pelanggan'] ?? 'all';
 $alamatFilter = trim($_GET['alamat'] ?? 'all');
@@ -129,7 +146,7 @@ $baseLaporanSql = "
         p.nomor_invoice,
         'berjalan' AS sumber_data
     FROM pelanggan_salam p
-    WHERE DATE_FORMAT(p.waktu, '%Y-%m') = ?
+    WHERE DATE_FORMAT(p.waktu, '%Y-%m') BETWEEN ? AND ?
 
     UNION ALL
 
@@ -155,7 +172,7 @@ $baseLaporanSql = "
         'riwayat' AS sumber_data
     FROM tagihan_salam t
     LEFT JOIN pelanggan_salam p ON p.id = t.pelanggan_id
-    WHERE DATE_FORMAT(t.periode, '%Y-%m') = ?
+    WHERE DATE_FORMAT(t.periode, '%Y-%m') BETWEEN ? AND ?
       AND NOT EXISTS (
           SELECT 1
           FROM pelanggan_salam p_berjalan
@@ -165,8 +182,8 @@ $baseLaporanSql = "
 ";
 
 $conditions = ['1 = 1'];
-$types = 'ss';
-$params = [$periode, $periode];
+$types = 'ssss';
+$params = [$periodeAwal, $periodeAkhir, $periodeAwal, $periodeAkhir];
 
 if (in_array($statusBayar, ['Lunas', 'Belum Lunas'], true)) {
     $conditions[] = 'status_bayar = ?';
@@ -194,7 +211,7 @@ if ($alamatFilter !== 'all' && $alamatFilter !== '') {
 }
 
 $where = 'WHERE ' . implode(' AND ', $conditions);
-$sql = "SELECT * FROM ({$baseLaporanSql}) AS laporan {$where} ORDER BY pelanggan_id ASC, id ASC";
+$sql = "SELECT * FROM ({$baseLaporanSql}) AS laporan {$where} ORDER BY waktu ASC, alamat ASC, nama ASC, pelanggan_id ASC, id ASC";
 $stmt = $koneksi->prepare($sql);
 if (!$stmt) {
     die('Query laporan multiwilayah gagal disiapkan: ' . $koneksi->error);
@@ -214,8 +231,15 @@ if ($search !== '') {
     }));
 }
 
-$periodeLabel = salamBulananIndonesia($periode . '-01', false);
-$filenameBase = 'laporan_billing_semua_wilayah_' . str_replace('-', '_', $periode);
+if ($periodeAwal === $periodeAkhir) {
+    $periodeLabel = salamBulananIndonesia($periodeAwal . '-01', false);
+    $filenameBase = 'laporan_billing_semua_wilayah_' . str_replace('-', '_', $periodeAwal);
+} else {
+    $periodeLabel = salamBulananIndonesia($periodeAwal . '-01', false)
+        . ' - ' . salamBulananIndonesia($periodeAkhir . '-01', false);
+    $filenameBase = 'laporan_billing_semua_wilayah_'
+        . str_replace('-', '_', $periodeAwal) . '_sd_' . str_replace('-', '_', $periodeAkhir);
+}
 
 function h($value): string { return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8'); }
 function numberPlain($value): string { return number_format((float) $value, 0, ',', '.'); }
@@ -427,7 +451,7 @@ function salamExportXlsx(
     $workbookXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         . '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
         . 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-        . '<sheets><sheet name="Laporan ' . salamXmlEscape($periodeLabel) . '" sheetId="1" r:id="rId1"/></sheets>'
+        . '<sheets><sheet name="' . salamXmlEscape(substr('Laporan ' . $periodeLabel, 0, 31)) . '" sheetId="1" r:id="rId1"/></sheets>'
         . '</workbook>';
 
     $contentTypesXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
