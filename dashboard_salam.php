@@ -4,6 +4,11 @@ require_once __DIR__ . '/db_salam.php';
 require_once __DIR__ . '/helpers_salam.php';
 salamRequireLogin();
 $isSuperAdminSalam = salamIsSuperAdmin();
+$isAdminSemuaWilayahSalam = salamIsAdminSemuaWilayah();
+$isAdminWilayahSalam = !$isSuperAdminSalam
+    && !$isAdminSemuaWilayahSalam
+    && strtolower((string) ($_SESSION['role'] ?? '')) === 'admin';
+$canAccessAnalitikSalam = $isSuperAdminSalam || $isAdminSemuaWilayahSalam || $isAdminWilayahSalam;
 $canAccessAllWilayah = salamCanAccessAllWilayah();
 $dashboardWilayah = $canAccessAllWilayah ? 'SEMUA WILAYAH' : salamWilayahLogin();
 $alamatWilayahResmi = array_values(salamDaftarWilayahResmi());
@@ -140,6 +145,25 @@ $dashboardYearOptions = range($dashboardMaxYear, $dashboardMinYear);
 
         .report-btn:hover {
             background-color: #6d3187;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        .analytics-btn {
+            background-color: #d68910;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            text-decoration: none;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            transition: all 0.3s ease;
+        }
+        .analytics-btn:hover {
+            background-color: #b9770e;
             transform: translateY(-2px);
             box-shadow: 0 4px 8px rgba(0,0,0,0.1);
         }
@@ -2058,6 +2082,11 @@ $dashboardYearOptions = range($dashboardMaxYear, $dashboardMinYear);
             <a href="monitoring_pppoe.php" class="monitor-btn">
                 <i class="fas fa-map-location-dot"></i> Monitoring PPPoE
             </a>
+            <?php if ($canAccessAnalitikSalam): ?>
+                <a href="analitik_salam.php" class="analytics-btn">
+                    <i class="fas fa-chart-column"></i> Ringkasan Analitik
+                </a>
+            <?php endif; ?>
             <?php if ($isSuperAdminSalam): ?>
                 <a href="kelola_admin.php" class="manage-btn">
                     <i class="fas fa-user-gear"></i> Kelola Admin

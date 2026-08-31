@@ -421,6 +421,7 @@ $exportQuery = http_build_query([
             font-size: 14px;
         }
         .btn-dashboard { background: var(--primary); }
+        .btn-analitik { background: #d68910; }
         .btn-logout { background: var(--danger); }
         .container {
             padding: 26px 30px 34px;
