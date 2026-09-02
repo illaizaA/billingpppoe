@@ -6,7 +6,7 @@
 $host = 'localhost';  
 $username = 'root';  
 $password = '';       
-$dbname = '1pppoebilling';
+$dbname = 'pppoebillingdelpoy';
 
 $koneksi = new mysqli($host, $username, $password, $dbname);
 

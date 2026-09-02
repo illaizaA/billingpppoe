@@ -23,8 +23,15 @@ $alamat = salamCanAccessAllWilayah()
 $tarif = (float) str_replace(',', '.', (string) ($_POST['tagihan'] ?? 0));
 $namaKtp = trim((string) ($_POST['nama_ktp'] ?? ''));
 $nik = preg_replace('/\s+/', '', trim((string) ($_POST['nik'] ?? ''))) ?? '';
-// Koordinat TIDAK diterima dari Billing.
-// Posisi marker selalu mengikuti latitude/longitude dari sumber PPPoE asli.
+try {
+    [$koordinatX, $koordinatY] = salamParseKoordinatBilling(
+        $_POST['koordinat_x'] ?? '',
+        $_POST['koordinat_y'] ?? ''
+    );
+} catch (Throwable $e) {
+    echo json_encode(['success'=>false,'message'=>$e->getMessage()]);
+    exit;
+}
 if ($nik !== '' && !preg_match('/^[0-9]{8,32}$/', $nik)) {
     echo json_encode(['success'=>false,'message'=>'NIK hanya boleh berisi angka.']);
     exit;
@@ -76,6 +83,7 @@ try {
         $nik,
         $fotoBaru ?? ''
     );
+    salamUpdatePelangganKoordinatBilling($koneksi, $id, $koordinatX, $koordinatY);
 
     $koneksi->commit();
 } catch (Throwable $e) {

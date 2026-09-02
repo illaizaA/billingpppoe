@@ -2254,6 +2254,17 @@ $dashboardYearOptions = range($dashboardMaxYear, $dashboardMinYear);
                                 </div>
                                 <div class="grid" style="margin-top:12px">
                                     <div class="col">
+                                        <label class="small">Koordinat X / Longitude <span style="font-weight:400;color:#7f8c8d;">(opsional)</span></label>
+                                        <input type="number" name="koordinat_x" min="-180" max="180" step="any" placeholder="Contoh: 110.483205">
+                                    </div>
+                                    <div class="col">
+                                        <label class="small">Koordinat Y / Latitude <span style="font-weight:400;color:#7f8c8d;">(opsional)</span></label>
+                                        <input type="number" name="koordinat_y" min="-90" max="90" step="any" placeholder="Contoh: -7.852331">
+                                    </div>
+                                </div>
+                                <div class="note">Koordinat Billing hanya membantu pencocokan. Isi X dan Y berpasangan; titik peta tetap berasal dari PPPoE.</div>
+                                <div class="grid" style="margin-top:12px">
+                                    <div class="col">
                                         <label class="small">Foto Rumah <span style="font-weight:400;color:#7f8c8d;">(opsional)</span></label>
                                         <input type="file" name="foto_rumah" accept="image/jpeg,image/png,image/webp">
                                     </div>

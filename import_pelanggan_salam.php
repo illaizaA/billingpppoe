@@ -561,6 +561,8 @@ if ($customerRows) {
         'alamat' => ['Alamat', 'Wilayah', 'Address'],
         'paket' => ['Paket', 'Paket Layanan', 'Package'],
         'tagihan' => ['Tarif Langganan', 'Tarif', 'Tagihan', 'Harga', 'Nominal'],
+        'koordinat_x' => ['Koordinat X / Longitude', 'Koordinat X', 'Longitude'],
+        'koordinat_y' => ['Koordinat Y / Latitude', 'Koordinat Y', 'Latitude'],
     ]);
 
     $required = ['nama', 'alamat', 'paket', 'tagihan'];
@@ -630,6 +632,10 @@ foreach ($customerRows as $index => $row) {
     $paket = salamImportRowValue($row, $customerMap, 'paket');
     $tarif = salamImportNominal(salamImportRowValue($row, $customerMap, 'tagihan'));
     $kodePelanggan = salamImportRowValue($row, $customerMap, 'kode_pelanggan');
+    $koordinatXRaw = salamImportRowValue($row, $customerMap, 'koordinat_x');
+    $koordinatYRaw = salamImportRowValue($row, $customerMap, 'koordinat_y');
+    $koordinatX = $koordinatXRaw !== '' && is_numeric($koordinatXRaw) ? (float) $koordinatXRaw : null;
+    $koordinatY = $koordinatYRaw !== '' && is_numeric($koordinatYRaw) ? (float) $koordinatYRaw : null;
 
     if ($nama === '' && $namaKtp !== '') {
         $nama = $namaKtp;
@@ -647,6 +653,24 @@ foreach ($customerRows as $index => $row) {
     if ($nik !== '' && !preg_match('/^[0-9]{8,32}$/', $nik)) {
         $skipped++;
         $errors[] = "Data Pelanggan baris {$excelRow}: NIK hanya boleh 8-32 angka.";
+        continue;
+    }
+
+    if (($koordinatXRaw === '') !== ($koordinatYRaw === '')) {
+        $skipped++;
+        $errors[] = "Data Pelanggan baris {$excelRow}: Koordinat X / Longitude dan Koordinat Y / Latitude harus diisi berpasangan.";
+        continue;
+    }
+
+    if ($koordinatXRaw !== '' && (!is_numeric($koordinatXRaw) || $koordinatX < -180 || $koordinatX > 180)) {
+        $skipped++;
+        $errors[] = "Data Pelanggan baris {$excelRow}: Koordinat X / Longitude harus berupa angka antara -180 sampai 180.";
+        continue;
+    }
+
+    if ($koordinatYRaw !== '' && (!is_numeric($koordinatYRaw) || $koordinatY < -90 || $koordinatY > 90)) {
+        $skipped++;
+        $errors[] = "Data Pelanggan baris {$excelRow}: Koordinat Y / Latitude harus berupa angka antara -90 sampai 90.";
         continue;
     }
 
@@ -717,6 +741,7 @@ foreach ($customerRows as $index => $row) {
             $nik,
             ''
         );
+        salamUpdatePelangganKoordinatBilling($koneksi, $pelangganDbId, $koordinatX, $koordinatY);
 
         $koneksi->commit();
         $imported++;

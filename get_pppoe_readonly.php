@@ -237,7 +237,8 @@ function salamBuildRuntimeBillingIndex(array $rows): array
  * Urutan final:
  * 1. Username/lokasi PPPoE -> Nama Pelanggan Billing + Alamat.
  * 2. Jika gagal -> Username/lokasi PPPoE -> Nama KTP Billing + Alamat.
- * 3. Jika gagal atau ambigu -> tidak terhubung.
+ * 3. Jika gagal -> koordinat Billing + wilayah sebagai fallback terakhir.
+ *    Hanya cocok bila ada tepat satu titik PPPoE dalam radius 30 meter.
  *
  * ID pelanggan Billing hanya ditampilkan setelah match berhasil,
  * bukan digunakan sebagai bahan pencocokan.
@@ -296,6 +297,98 @@ function salamFindRuntimeBillingMatch(array $pppoeRow, array $index): ?array
     return null;
 }
 
+function salamRuntimeDistanceMeters(float $lat1, float $lon1, float $lat2, float $lon2): float
+{
+    $earthRadius = 6371000.0;
+    $latDelta = deg2rad($lat2 - $lat1);
+    $lonDelta = deg2rad($lon2 - $lon1);
+    $a = sin($latDelta / 2) ** 2
+        + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($lonDelta / 2) ** 2;
+    return $earthRadius * 2 * atan2(sqrt($a), sqrt(1 - $a));
+}
+
+/**
+ * Fallback terakhir: koordinat Billing hanya membantu memilih titik PPPoE.
+ * Mapping dibuat bila satu pelanggan Billing memiliki tepat satu kandidat
+ * PPPoE pada wilayah sama dalam radius maksimal 30 meter, dan titik PPPoE
+ * tersebut tidak diklaim pelanggan Billing lain.
+ */
+function salamBuildRuntimeCoordinateFallback(array $pppoes, array $billingRows, array $textMatches): array
+{
+    $usedBillingIds = [];
+    foreach ($textMatches as $match) {
+        $billingId = (int) ($match['id'] ?? 0);
+        if ($billingId > 0) {
+            $usedBillingIds[$billingId] = true;
+        }
+    }
+
+    $claims = [];
+    foreach ($billingRows as $billingRow) {
+        $billingId = (int) ($billingRow['id'] ?? 0);
+        if ($billingId <= 0 || isset($usedBillingIds[$billingId])) {
+            continue;
+        }
+
+        $x = $billingRow['koordinat_x'] ?? null;
+        $y = $billingRow['koordinat_y'] ?? null;
+        if (!is_numeric($x) || !is_numeric($y)) {
+            continue;
+        }
+
+        $billingAddress = salamRuntimeNormalize($billingRow['alamat'] ?? '');
+        if ($billingAddress === '') {
+            continue;
+        }
+
+        $candidates = [];
+        foreach ($pppoes as $pppoeIndex => $pppoeRow) {
+            if (isset($textMatches[$pppoeIndex])) {
+                continue;
+            }
+
+            $latitude = $pppoeRow['latitude'] ?? $pppoeRow['lat'] ?? null;
+            $longitude = $pppoeRow['longitude'] ?? $pppoeRow['lng'] ?? $pppoeRow['lon'] ?? null;
+            if (!is_numeric($latitude) || !is_numeric($longitude)) {
+                continue;
+            }
+
+            $sameAddress = false;
+            foreach (salamRuntimePppoeMatchPairs($pppoeRow) as $pair) {
+                if (($pair['address'] ?? '') === $billingAddress) {
+                    $sameAddress = true;
+                    break;
+                }
+            }
+            if (!$sameAddress) {
+                continue;
+            }
+
+            $distance = salamRuntimeDistanceMeters(
+                (float) $y,
+                (float) $x,
+                (float) $latitude,
+                (float) $longitude
+            );
+            if ($distance <= 30.0) {
+                $candidates[] = (int) $pppoeIndex;
+            }
+        }
+
+        if (count($candidates) === 1) {
+            $claims[$candidates[0]][$billingId] = $billingRow;
+        }
+    }
+
+    $fallback = [];
+    foreach ($claims as $pppoeIndex => $billingClaims) {
+        if (count($billingClaims) === 1) {
+            $fallback[(int) $pppoeIndex] = array_values($billingClaims)[0];
+        }
+    }
+    return $fallback;
+}
+
 try {
     // 1. Baca PPPoE asli.
     $pppoes = salamFetchJsonReadonly(
@@ -314,7 +407,9 @@ try {
                    p.alamat,
                    d.nama_ktp,
                    d.nik,
-                   d.foto_rumah
+                   d.foto_rumah,
+                   d.koordinat_x,
+                   d.koordinat_y
             FROM pelanggan_salam p
             LEFT JOIN pelanggan_detail_salam d
               ON d.pelanggan_id = p.id
@@ -333,9 +428,29 @@ try {
 
     // 3. Index hanya di memory. Tidak ada tabel mapping.
     $runtimeIndex = salamBuildRuntimeBillingIndex($billingRows);
+    $textMatches = [];
+    foreach ($pppoes as $pppoeIndex => $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        if (array_key_exists('icon', $row) && (int) $row['icon'] !== 119) {
+            continue;
+        }
+        $latitude = $row['latitude'] ?? $row['lat'] ?? null;
+        $longitude = $row['longitude'] ?? $row['lng'] ?? $row['lon'] ?? null;
+        if (!is_numeric($latitude) || !is_numeric($longitude)) {
+            continue;
+        }
+
+        $match = salamFindRuntimeBillingMatch($row, $runtimeIndex);
+        if ($match !== null) {
+            $textMatches[(int) $pppoeIndex] = $match;
+        }
+    }
+    $coordinateMatches = salamBuildRuntimeCoordinateFallback($pppoes, $billingRows, $textMatches);
     $clean = [];
 
-    foreach ($pppoes as $row) {
+    foreach ($pppoes as $pppoeIndex => $row) {
         if (!is_array($row)) {
             continue;
         }
@@ -354,8 +469,10 @@ try {
             continue;
         }
 
-        // 4. Cocokkan di memory tanpa menyimpan apa pun.
-        $billingRow = salamFindRuntimeBillingMatch($row, $runtimeIndex);
+        // 4. Nama + wilayah, lalu Nama KTP + wilayah; koordinat hanya fallback terakhir.
+        $billingRow = $textMatches[(int) $pppoeIndex]
+            ?? $coordinateMatches[(int) $pppoeIndex]
+            ?? null;
 
         $clean[] = [
             'id' => trim((string) ($row['id'] ?? '')),

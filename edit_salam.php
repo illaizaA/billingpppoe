@@ -58,8 +58,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update'])) {
         : 'Belum Lunas';
     $namaKtp = trim((string) ($_POST['nama_ktp'] ?? ''));
     $nik = preg_replace('/\s+/', '', trim((string) ($_POST['nik'] ?? ''))) ?? '';
-    // Koordinat tidak pernah disimpan dari form Billing.
-    // Latitude/longitude hanya dibaca dari sumber PPPoE asli.
+    try {
+        [$koordinatX, $koordinatY] = salamParseKoordinatBilling(
+            $_POST['koordinat_x'] ?? '',
+            $_POST['koordinat_y'] ?? ''
+        );
+    } catch (Throwable $e) {
+        $errorMessage = $e->getMessage();
+        $koordinatX = null;
+        $koordinatY = null;
+    }
     if ($nik !== '' && !preg_match('/^[0-9]{8,32}$/', $nik)) {
         $errorMessage = 'NIK hanya boleh berisi angka.';
     }
@@ -234,6 +242,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update'])) {
                 $nik,
                 $fotoFinal
             );
+            salamUpdatePelangganKoordinatBilling($koneksi, $id, $koordinatX, $koordinatY);
             $koneksi->commit();
             $ok = true;
             $detail = salamGetPelangganDetail($koneksi, $id);
@@ -417,6 +426,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update'])) {
                 </div>
 
                 <div style="margin-top:18px;padding-top:14px;border-top:1px solid #e6eef6;">
+                    <div style="font-weight:700;color:#2c3e50;margin-bottom:10px;">Koordinat Billing <span style="font-weight:400;color:#64748b;font-size:12px;">(Opsional dan dapat diedit)</span></div>
+                    <div class="grid">
+                        <div class="col">
+                            <label class="small">Koordinat X / Longitude</label>
+                            <input type="number" name="koordinat_x" min="-180" max="180" step="any" <?= $isHistorical ? 'readonly' : ''; ?> value="<?= htmlspecialchars((string) ($detail['koordinat_x'] ?? '')); ?>" placeholder="Contoh: 110.483205">
+                        </div>
+                        <div class="col">
+                            <label class="small">Koordinat Y / Latitude</label>
+                            <input type="number" name="koordinat_y" min="-90" max="90" step="any" <?= $isHistorical ? 'readonly' : ''; ?> value="<?= htmlspecialchars((string) ($detail['koordinat_y'] ?? '')); ?>" placeholder="Contoh: -7.852331">
+                        </div>
+                    </div>
+                    <div class="note">Koordinat ini milik Billing dan hanya menjadi fallback pencocokan. Tidak mengubah koordinat, IP, username, atau status PPPoE.</div>
+                </div>
+
+                <div style="margin-top:18px;padding-top:14px;border-top:1px solid #e6eef6;">
                     <div style="font-weight:700;color:#2c3e50;margin-bottom:10px;">Tagihan</div>
                 <div class="grid" style="margin-top:12px">
                     <div class="col">
@@ -470,7 +494,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update'])) {
                             </div>
                         </div>
                         <div id="pppoe-coordinate-note" class="note">
-                            Billing yang menyesuaikan ke data PPPoE. Admin tidak mengisi ID teknis, username PPPoE, koordinat, IP, atau status jaringan.
+                            Billing yang menyesuaikan ke data PPPoE. Admin tidak dapat mengubah ID teknis, username, koordinat PPPoE, IP, atau status jaringan.
                         </div>
                     </div>
                 </div>

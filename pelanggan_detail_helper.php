@@ -180,7 +180,67 @@ function salamUpsertPelangganDetailBilling(
     $stmt->close();
 }
 
-// Kompatibilitas pemanggil lama: koordinat dan username PPPoE sengaja diabaikan.
+function salamUpdatePelangganKoordinatBilling(
+    mysqli $koneksi,
+    int $pelangganId,
+    ?float $koordinatX,
+    ?float $koordinatY
+): void {
+    if (($koordinatX === null) !== ($koordinatY === null)) {
+        throw new RuntimeException('Koordinat X / Longitude dan Koordinat Y / Latitude harus diisi berpasangan.');
+    }
+    if ($koordinatX !== null && ($koordinatX < -180 || $koordinatX > 180)) {
+        throw new RuntimeException('Koordinat X / Longitude harus berada antara -180 sampai 180.');
+    }
+    if ($koordinatY !== null && ($koordinatY < -90 || $koordinatY > 90)) {
+        throw new RuntimeException('Koordinat Y / Latitude harus berada antara -90 sampai 90.');
+    }
+
+    $stmt = $koneksi->prepare(
+        'UPDATE pelanggan_detail_salam SET koordinat_x = ?, koordinat_y = ? WHERE pelanggan_id = ?'
+    );
+    if (!$stmt) {
+        throw new RuntimeException('Gagal menyiapkan koordinat pelanggan: ' . $koneksi->error);
+    }
+    $stmt->bind_param('ddi', $koordinatX, $koordinatY, $pelangganId);
+    if (!$stmt->execute()) {
+        $message = $stmt->error;
+        $stmt->close();
+        throw new RuntimeException('Gagal menyimpan koordinat pelanggan: ' . $message);
+    }
+    $stmt->close();
+}
+
+function salamParseKoordinatBilling(mixed $koordinatXRaw, mixed $koordinatYRaw): array
+{
+    $xRaw = str_replace(',', '.', trim((string) $koordinatXRaw));
+    $yRaw = str_replace(',', '.', trim((string) $koordinatYRaw));
+
+    if ($xRaw === '' && $yRaw === '') {
+        return [null, null];
+    }
+    if ($xRaw === '' || $yRaw === '') {
+        throw new RuntimeException('Koordinat X / Longitude dan Koordinat Y / Latitude harus diisi berpasangan.');
+    }
+    if (!is_numeric($xRaw)) {
+        throw new RuntimeException('Koordinat X / Longitude harus berupa angka.');
+    }
+    if (!is_numeric($yRaw)) {
+        throw new RuntimeException('Koordinat Y / Latitude harus berupa angka.');
+    }
+
+    $x = (float) $xRaw;
+    $y = (float) $yRaw;
+    if ($x < -180 || $x > 180) {
+        throw new RuntimeException('Koordinat X / Longitude harus berada antara -180 sampai 180.');
+    }
+    if ($y < -90 || $y > 90) {
+        throw new RuntimeException('Koordinat Y / Latitude harus berada antara -90 sampai 90.');
+    }
+    return [$x, $y];
+}
+
+// Kompatibilitas pemanggil lama: koordinat disimpan di Billing; username PPPoE tetap tidak ditulis.
 function salamUpsertPelangganDetail(
     mysqli $koneksi,
     int $pelangganId,
@@ -198,5 +258,6 @@ function salamUpsertPelangganDetail(
         $nik,
         $fotoRumah
     );
+    salamUpdatePelangganKoordinatBilling($koneksi, $pelangganId, $koordinatX, $koordinatY);
 }
 ?>
