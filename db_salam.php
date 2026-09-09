@@ -7,7 +7,7 @@ date_default_timezone_set('Asia/Jakarta');
 $host = 'localhost';  
 $username = 'root';  
 $password = '';       
-$dbname = 'pppoebillingdelpoy';
+$dbname = '1pppoebilling';
 
 $koneksi = new mysqli($host, $username, $password, $dbname);
 

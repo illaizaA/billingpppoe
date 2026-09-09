@@ -473,6 +473,19 @@ $maxOutstanding = max(1, ...array_map(fn($r)=>(float)$r['value'], $outstanding ?
             .payment-gauge-visual,.payment-gauge-svg{width:96px}
             .payment-gauge-center strong{font-size:15px}
         }
+
+        /* Tambahan export Excel analitik - tidak mengubah komponen analitik yang sudah ada. */
+        .filter-actions{flex-wrap:wrap}
+        .panel-head-actions{display:flex;align-items:center;gap:7px;flex:0 0 auto}
+        .excel-export-btn{border:1px solid #cfe7da;background:#eefaf3;color:#18794e;border-radius:8px;padding:6px 9px;font-size:10.5px;font-weight:800;cursor:pointer;display:inline-flex;align-items:center;gap:5px;white-space:nowrap;min-height:30px}
+        .excel-export-btn:hover,.excel-export-btn:focus{background:#dff5e8;border-color:#b8ddc8;outline:none}
+        .btn-export-all{background:#1f9d60;color:#fff;display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+        .btn-export-all:hover,.btn-export-all:focus{background:#188650}
+        .modal-head-actions{display:flex;align-items:center;gap:7px;flex:0 0 auto}
+        .modal-export-btn{border:1px solid #cfe7da;background:#eefaf3;color:#18794e;border-radius:8px;padding:8px 10px;font-size:11px;font-weight:800;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+        .modal-export-btn:hover:not(:disabled),.modal-export-btn:focus:not(:disabled){background:#dff5e8}
+        .modal-export-btn:disabled{opacity:.5;cursor:not-allowed}
+        @media(max-width:720px){.filter-actions{display:grid;grid-template-columns:1fr 1fr;width:100%}.filter-actions .btn-export-all{grid-column:1/-1;justify-content:center}.excel-export-btn{padding:6px 8px}.modal-export-btn span{display:none}.modal-export-btn{width:34px;height:34px;padding:0;justify-content:center}}
     </style>
 </head>
 <body>
@@ -539,6 +552,7 @@ $maxOutstanding = max(1, ...array_map(fn($r)=>(float)$r['value'], $outstanding ?
                 <div class="filter-actions">
                     <button class="btn btn-primary" type="submit"><i class="fas fa-filter"></i> Tampilkan</button>
                     <a class="btn btn-reset" href="analitik_salam.php"><i class="fas fa-rotate-left" style="margin-right:6px"></i> Reset</a>
+                    <button class="btn btn-export-all" type="button" data-export-all title="Unduh semua hasil analitik beserta rinciannya dalam satu file Excel"><i class="fas fa-file-excel"></i> Export Semua Analitik</button>
                 </div>
             </div>
         </form>
@@ -546,7 +560,7 @@ $maxOutstanding = max(1, ...array_map(fn($r)=>(float)$r['value'], $outstanding ?
 
     <div class="analytics-grid">
         <section class="panel">
-            <div class="panel-head"><div><h3>Perkembangan Pembayaran</h3></div><i class="fas fa-chart-line" style="color:#3498db"></i></div>
+            <div class="panel-head"><div><h3>Perkembangan Pembayaran</h3></div><div class="panel-head-actions"><button type="button" class="excel-export-btn" data-export-analytic="trend" title="Unduh hasil dan rincian Perkembangan Pembayaran"><i class="fas fa-file-excel"></i> Unduh Excel</button><i class="fas fa-chart-line" style="color:#3498db"></i></div></div>
             <div class="chart-area trend-scroll">
                 <?php if (!$points): ?><div class="empty">Belum ada data pada rentang ini.</div><?php else: ?>
                 <svg class="trend-svg" viewBox="0 0 <?= $trendWidth ?> <?= $trendHeight ?>" <?= $trendRenderMinWidth > 0 ? 'style="min-width:' . (int)$trendRenderMinWidth . 'px"' : '' ?> aria-label="Perkembangan pembayaran">
@@ -582,7 +596,10 @@ $maxOutstanding = max(1, ...array_map(fn($r)=>(float)$r['value'], $outstanding ?
                         <h3>Prioritas Pelanggan Belum Bayar</h3>
                         <div class="panel-sub">Urut dari tunggakan terlama</div>
                     </div>
-                    <i class="fas fa-user-clock" style="color:#e74c3c"></i>
+                    <div class="panel-head-actions">
+                        <button type="button" class="excel-export-btn" data-export-analytic="unpaid" title="Unduh hasil dan rincian Prioritas Pelanggan Belum Bayar"><i class="fas fa-file-excel"></i> Unduh Excel</button>
+                        <i class="fas fa-user-clock" style="color:#e74c3c"></i>
+                    </div>
                 </div>
                 <div class="chart-area" style="justify-content:flex-start">
                     <div class="priority-summary">
@@ -625,7 +642,10 @@ $maxOutstanding = max(1, ...array_map(fn($r)=>(float)$r['value'], $outstanding ?
                             <span><i class="bar-note-dot" style="background:#27ae60"></i>Tanpa tunggakan</span>
                         </div>
                     </div>
-                    <i class="fas fa-user-clock" style="color:#e74c3c"></i>
+                    <div class="panel-head-actions">
+                        <button type="button" class="excel-export-btn" data-export-analytic="unpaid" title="Unduh hasil dan rincian Belum Bayar per Wilayah"><i class="fas fa-file-excel"></i> Unduh Excel</button>
+                        <i class="fas fa-user-clock" style="color:#e74c3c"></i>
+                    </div>
                 </div>
                 <div class="chart-area">
                     <?php if (!$regionUnpaid): ?>
@@ -660,7 +680,7 @@ $maxOutstanding = max(1, ...array_map(fn($r)=>(float)$r['value'], $outstanding ?
         </section>
 
         <section class="panel">
-            <div class="panel-head"><div><h3><?= $scope['is_all'] ? 'Total Tunggakan per Wilayah' : 'Tunggakan per Bulan' ?></h3></div><i class="fas fa-chart-column" style="color:#8e44ad"></i></div>
+            <div class="panel-head"><div><h3><?= $scope['is_all'] ? 'Total Tunggakan per Wilayah' : 'Tunggakan per Bulan' ?></h3></div><div class="panel-head-actions"><button type="button" class="excel-export-btn" data-export-analytic="outstanding" title="Unduh hasil dan rincian Tunggakan"><i class="fas fa-file-excel"></i> Unduh Excel</button><i class="fas fa-chart-column" style="color:#8e44ad"></i></div></div>
             <div class="chart-area">
                 <?php if (!$outstanding): ?>
                     <div class="empty">Belum ada data tunggakan pada periode ini.</div>
@@ -701,7 +721,10 @@ $maxOutstanding = max(1, ...array_map(fn($r)=>(float)$r['value'], $outstanding ?
                     <h3>Pelanggan Paling Rajin Bayar</h3>
                     <div class="panel-sub">Berdasarkan periode yang dipilih</div>
                 </div>
-                <i class="fas fa-trophy" style="color:#d89b16"></i>
+                <div class="panel-head-actions">
+                    <button type="button" class="excel-export-btn" data-export-analytic="top" title="Unduh hasil dan rincian Pelanggan Paling Rajin Bayar"><i class="fas fa-file-excel"></i> Unduh Excel</button>
+                    <i class="fas fa-trophy" style="color:#d89b16"></i>
+                </div>
             </div>
             <div class="chart-area">
                 <?php if(!$top5): ?>
@@ -749,6 +772,7 @@ $maxOutstanding = max(1, ...array_map(fn($r)=>(float)$r['value'], $outstanding ?
                             <h4>Kondisi Pembayaran per Wilayah</h4>
                             <span>Menunjukkan berapa persen pembayaran yang sudah terkumpul</span>
                         </div>
+                        <button type="button" class="excel-export-btn" data-export-analytic="financial" title="Unduh hasil dan rincian Kondisi Pembayaran per Wilayah"><i class="fas fa-file-excel"></i> Unduh Excel</button>
                     </div>
 
                     <div class="payment-gauge-grid">
@@ -815,9 +839,12 @@ $maxOutstanding = max(1, ...array_map(fn($r)=>(float)$r['value'], $outstanding ?
                             <h4>Status Tagihan per Wilayah</h4>
                             <span>Komposisi jumlah tagihan lunas dan belum lunas</span>
                         </div>
-                        <div class="comparison-legend compact">
-                            <span><i class="legend-swatch paid"></i>Lunas</span>
-                            <span><i class="legend-swatch unpaid"></i>Belum</span>
+                        <div class="panel-head-actions">
+                            <button type="button" class="excel-export-btn" data-export-analytic="status" title="Unduh hasil dan rincian Status Tagihan per Wilayah"><i class="fas fa-file-excel"></i> Unduh Excel</button>
+                            <div class="comparison-legend compact">
+                                <span><i class="legend-swatch paid"></i>Lunas</span>
+                                <span><i class="legend-swatch unpaid"></i>Belum</span>
+                            </div>
                         </div>
                     </div>
 
@@ -871,7 +898,12 @@ $maxOutstanding = max(1, ...array_map(fn($r)=>(float)$r['value'], $outstanding ?
 
 <div class="modal-backdrop" id="detailModal" aria-hidden="true">
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
-        <div class="modal-head"><h3 id="detailTitle">Detail Analitik</h3><button type="button" class="modal-close" id="closeDetail" aria-label="Tutup">&times;</button></div>
+        <div class="modal-head">
+            <h3 id="detailTitle">Detail Analitik</h3>
+            <div class="modal-head-actions">
+                <button type="button" class="modal-close" id="closeDetail" aria-label="Tutup">&times;</button>
+            </div>
+        </div>
         <div class="modal-body" id="detailBody"><div class="loading">Memuat data...</div></div>
     </div>
 </div>
@@ -890,6 +922,13 @@ $maxOutstanding = max(1, ...array_map(fn($r)=>(float)$r['value'], $outstanding ?
     const title = document.getElementById('detailTitle');
     const body = document.getElementById('detailBody');
     const close = document.getElementById('closeDetail');
+
+    function exportUrl(mode, extra = {}) {
+        const p = new URLSearchParams(rootParams);
+        p.set('mode', mode);
+        Object.entries(extra).forEach(([key, value]) => p.set(key, String(value ?? '')));
+        return 'export_analitik_salam.php?' + p.toString();
+    }
 
     function esc(value) {
         return String(value ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
@@ -931,6 +970,23 @@ $maxOutstanding = max(1, ...array_map(fn($r)=>(float)$r['value'], $outstanding ?
             body.innerHTML = `<div class="error-box">${esc(err.message)}</div>`;
         }
     }
+
+
+    document.querySelectorAll('[data-export-analytic]').forEach(button => {
+        button.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const analytic = button.getAttribute('data-export-analytic') || '';
+            if (!analytic) return;
+            window.location.href = exportUrl('panel', {analytic});
+        });
+    });
+
+    document.querySelectorAll('[data-export-all]').forEach(button => {
+        button.addEventListener('click', () => {
+            window.location.href = exportUrl('all');
+        });
+    });
 
     window.openAnalitikDetail = openDetail;
 
