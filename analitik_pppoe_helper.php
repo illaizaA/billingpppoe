@@ -142,7 +142,8 @@ function analitikPppoeLoadBillingRows(mysqli $koneksi, array $scope): array
                    COALESCE(p.status_pelanggan, '') AS status_pelanggan,
                    COALESCE(d.nama_ktp, '') AS nama_ktp,
                    COALESCE(d.nik, '') AS nik,
-                   COALESCE(d.foto_rumah, '') AS foto_rumah
+                   COALESCE(d.foto_rumah, '') AS foto_rumah,
+                   COALESCE(d.pppoe_user, '') AS pppoe_user
             FROM pelanggan_salam p
             LEFT JOIN pelanggan_detail_salam d ON d.pelanggan_id = p.id";
 
@@ -177,25 +178,33 @@ function analitikPppoeLoadBillingRows(mysqli $koneksi, array $scope): array
     return $rows;
 }
 
-function analitikPppoeBuildBillingIndex(array $rows): array
+function analitikPppoeBuildBillingIndex(array $rows, array $validPppoeIds = []): array
 {
     $byCustomerNameAddress = [];
     $byKtpNameAddress = [];
+    $byManualPppoe = [];
+    $manualBillingIds = [];
 
     foreach ($rows as $row) {
         $id = (int) ($row['id'] ?? 0);
         if ($id <= 0) continue;
 
+        $manualId = trim((string) ($row['pppoe_user'] ?? ''));
+        if ($manualId !== '' && isset($validPppoeIds[$manualId])) {
+            $byManualPppoe[$manualId] = $row;
+            $manualBillingIds[$id] = true;
+        }
+
         $address = analitikPppoeNormalize($row['alamat'] ?? '');
         if ($address === '') continue;
 
         $customerName = analitikPppoeNormalize($row['nama'] ?? '');
-        if ($customerName !== '') {
+        if ($customerName !== '' && !isset($manualBillingIds[$id])) {
             $byCustomerNameAddress[$customerName . '|' . $address][$id] = $row;
         }
 
         $ktpName = analitikPppoeNormalize($row['nama_ktp'] ?? '');
-        if ($ktpName !== '') {
+        if ($ktpName !== '' && !isset($manualBillingIds[$id])) {
             $byKtpNameAddress[$ktpName . '|' . $address][$id] = $row;
         }
     }
@@ -203,11 +212,16 @@ function analitikPppoeBuildBillingIndex(array $rows): array
     return [
         'by_customer_name_address' => $byCustomerNameAddress,
         'by_ktp_name_address' => $byKtpNameAddress,
+        'by_manual_pppoe' => $byManualPppoe,
     ];
 }
 
 function analitikPppoeFindBillingMatch(array $pppoeRow, array $index): ?array
 {
+    $pppoeId = trim((string) ($pppoeRow['id'] ?? ''));
+    if ($pppoeId !== '' && isset($index['by_manual_pppoe'][$pppoeId])) {
+        return $index['by_manual_pppoe'][$pppoeId];
+    }
     $pairs = analitikPppoeMatchPairs($pppoeRow);
     if (!$pairs) return null;
 
@@ -661,7 +675,13 @@ function analitikBuildPppoeMap(mysqli $koneksi, string $awal, string $akhir, arr
 {
     $pppoes = analitikPppoeFetchReadonly(PPPOE_MONITOR_API_URL, PPPOE_MONITOR_TIMEOUT_SECONDS);
     $billingRows = analitikPppoeLoadBillingRows($koneksi, $scope);
-    $billingIndex = analitikPppoeBuildBillingIndex($billingRows);
+    $validPppoeIds = [];
+    foreach ($pppoes as $pppoeRow) {
+        if (!is_array($pppoeRow)) continue;
+        $pppoeId = trim((string) ($pppoeRow['id'] ?? ''));
+        if ($pppoeId !== '') $validPppoeIds[$pppoeId] = true;
+    }
+    $billingIndex = analitikPppoeBuildBillingIndex($billingRows, $validPppoeIds);
     $records = analitikLoadRecords($koneksi, $awal, $akhir, $scope);
     $billingSummary = analitikPppoeBillingSummaryByCustomer($records, $akhir);
 

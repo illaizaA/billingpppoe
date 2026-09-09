@@ -5,6 +5,7 @@ require_once __DIR__ . '/db_salam.php';
 require_once __DIR__ . '/helpers_salam.php';
 require_once __DIR__ . '/pelanggan_detail_helper.php';
 require_once __DIR__ . '/config_monitoring_pppoe.php';
+require_once __DIR__ . '/pppoe_manual_helper.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
@@ -409,7 +410,8 @@ try {
                    d.nik,
                    d.foto_rumah,
                    d.koordinat_x,
-                   d.koordinat_y
+                   d.koordinat_y,
+                   d.pppoe_user
             FROM pelanggan_salam p
             LEFT JOIN pelanggan_detail_salam d
               ON d.pelanggan_id = p.id
@@ -426,8 +428,33 @@ try {
         $result->free();
     }
 
-    // 3. Index hanya di memory. Tidak ada tabel mapping.
-    $runtimeIndex = salamBuildRuntimeBillingIndex($billingRows);
+    // 3. Pilihan manual di Billing menjadi prioritas. Jika kosong/tidak valid,
+    // matching otomatis lama tetap digunakan.
+    $billingByManualPppoe = [];
+    $manualBillingIds = [];
+    foreach ($billingRows as $billingRow) {
+        $manualId = trim((string) ($billingRow['pppoe_user'] ?? ''));
+        if ($manualId === '') continue;
+        $billingByManualPppoe[$manualId] = $billingRow;
+    }
+
+    $manualMatches = [];
+    foreach ($pppoes as $pppoeIndex => $row) {
+        if (!is_array($row)) continue;
+        $pppoeId = trim((string) ($row['id'] ?? ''));
+        if ($pppoeId !== '' && isset($billingByManualPppoe[$pppoeId])) {
+            $manualMatches[(int) $pppoeIndex] = $billingByManualPppoe[$pppoeId];
+            $manualBillingIds[(int) $billingByManualPppoe[$pppoeId]['id']] = true;
+        }
+    }
+
+    // Mesin auto-match asli dipertahankan. Pelanggan yang sudah mempunyai
+    // pilihan manual valid saja yang dikeluarkan dari kandidat otomatis.
+    $automaticBillingRows = array_values(array_filter(
+        $billingRows,
+        static fn(array $billingRow): bool => !isset($manualBillingIds[(int) ($billingRow['id'] ?? 0)])
+    ));
+    $runtimeIndex = salamBuildRuntimeBillingIndex($automaticBillingRows);
     $textMatches = [];
     foreach ($pppoes as $pppoeIndex => $row) {
         if (!is_array($row)) {
@@ -442,12 +469,14 @@ try {
             continue;
         }
 
+        if (isset($manualMatches[(int) $pppoeIndex])) continue;
         $match = salamFindRuntimeBillingMatch($row, $runtimeIndex);
         if ($match !== null) {
             $textMatches[(int) $pppoeIndex] = $match;
         }
     }
-    $coordinateMatches = salamBuildRuntimeCoordinateFallback($pppoes, $billingRows, $textMatches);
+    $resolvedBeforeCoordinates = $manualMatches + $textMatches;
+    $coordinateMatches = salamBuildRuntimeCoordinateFallback($pppoes, $billingRows, $resolvedBeforeCoordinates);
     $clean = [];
 
     foreach ($pppoes as $pppoeIndex => $row) {
@@ -470,9 +499,13 @@ try {
         }
 
         // 4. Nama + wilayah, lalu Nama KTP + wilayah; koordinat hanya fallback terakhir.
-        $billingRow = $textMatches[(int) $pppoeIndex]
+        $billingRow = $manualMatches[(int) $pppoeIndex]
+            ?? $textMatches[(int) $pppoeIndex]
             ?? $coordinateMatches[(int) $pppoeIndex]
             ?? null;
+        $matchMethod = isset($manualMatches[(int) $pppoeIndex]) ? 'manual'
+            : (isset($textMatches[(int) $pppoeIndex]) ? 'automatic_name'
+            : (isset($coordinateMatches[(int) $pppoeIndex]) ? 'automatic_coordinate' : null));
 
         $clean[] = [
             'id' => trim((string) ($row['id'] ?? '')),
@@ -484,6 +517,7 @@ try {
             'status' => strtoupper((string) ($row['status'] ?? 'UNKNOWN')),
             'router' => (string) ($row['router'] ?? ''),
             'billing' => $billingRow ? salamBillingPublicRow($billingRow) : null,
+            'match_method' => $matchMethod,
         ];
     }
 

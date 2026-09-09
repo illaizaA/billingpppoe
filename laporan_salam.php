@@ -1002,7 +1002,7 @@ $exportQuery = http_build_query([
         <div class="page-title">
             <div>
                 <h2>Laporan Billing Semua Wilayah / UKOOMED</h2>
-                
+
             </div>
         </div>
 
@@ -1110,8 +1110,10 @@ $exportQuery = http_build_query([
                             <option value="all" <?= $perPage === 'all' ? 'selected' : ''; ?>>Semua</option>
                         </select>
                     </form>
-                    <a class="btn btn-excel" href="export_laporan_salam.php?format=excel&<?= htmlspecialchars($exportQuery); ?>"><i class="fas fa-file-excel"></i> Export Excel</a>
-                    <a class="btn btn-pdf" target="_blank" href="export_laporan_salam.php?format=pdf&<?= htmlspecialchars($exportQuery); ?>"><i class="fas fa-file-pdf"></i> Export PDF</a>
+                    <a class="btn btn-excel" href="export_laporan_salam.php?format=excel&<?= htmlspecialchars($exportQuery); ?>"><i class="fas fa-file-excel"></i> Excel Keuangan</a>
+                    <a class="btn btn-pdf" target="_blank" href="export_laporan_salam.php?format=pdf&<?= htmlspecialchars($exportQuery); ?>"><i class="fas fa-file-pdf"></i> PDF Keuangan</a>
+                    <a class="btn btn-excel" href="export_data_pelanggan_salam.php?format=excel&<?= htmlspecialchars($exportQuery); ?>"><i class="fas fa-address-book"></i> Excel Data Lengkap</a>
+                    <a class="btn btn-pdf" target="_blank" href="export_data_pelanggan_salam.php?format=pdf&<?= htmlspecialchars($exportQuery); ?>"><i class="fas fa-file-pdf"></i> PDF Data Lengkap</a>
                 </div>
             </div>
 

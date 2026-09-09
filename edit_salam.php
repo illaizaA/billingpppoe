@@ -6,6 +6,8 @@ require_once __DIR__ . '/pelanggan_detail_helper.php';
 require_once __DIR__ . '/tagihan_periode_helper.php';
 
 salamRequireLogin();
+$pppoeManualCsrf = $_SESSION['pppoe_manual_csrf'] ?? bin2hex(random_bytes(24));
+$_SESSION['pppoe_manual_csrf'] = $pppoeManualCsrf;
 $canAccessAllWilayah = salamCanAccessAllWilayah();
 
 $id = (int) ($_GET['id'] ?? 0);
@@ -496,6 +498,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update'])) {
                         <div id="pppoe-coordinate-note" class="note">
                             Billing yang menyesuaikan ke data PPPoE. Admin tidak dapat mengubah ID teknis, username, koordinat PPPoE, IP, atau status jaringan.
                         </div>
+                        <?php if (!$isHistorical): ?>
+                        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+                            <button type="button" id="pppoe-manual-choose" class="btn btn-primary">Pilih PPPoE Manual</button>
+                            <button type="button" id="pppoe-manual-disconnect" class="btn btn-muted" style="display:none;">Putuskan Koneksi Manual</button>
+                        </div>
+                        <div id="pppoe-manual-list" style="display:none;margin-top:10px;padding:10px;border:1px solid #dbe5ee;border-radius:8px;background:#fff;"></div>
+                        <?php endif; ?>
                     </div>
                 </div>
 
@@ -571,6 +580,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update'])) {
     const yBox = document.getElementById('pppoe-coordinate-y');
     const networkBox = document.getElementById('pppoe-network-info');
     const note = document.getElementById('pppoe-coordinate-note');
+    const chooseButton = document.getElementById('pppoe-manual-choose');
+    const disconnectButton = document.getElementById('pppoe-manual-disconnect');
+    const candidateList = document.getElementById('pppoe-manual-list');
+    const csrfToken = <?= json_encode($pppoeManualCsrf) ?>;
 
     if (!xBox || !yBox || !networkBox) return;
 
@@ -594,6 +607,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update'])) {
                 if (note) {
                     note.textContent = 'Data Billing tetap dapat diedit. Sistem tidak membuat koordinat atau status dummy.';
                 }
+                if (chooseButton) chooseButton.textContent = 'Pilih PPPoE Manual';
+                if (disconnectButton) disconnectButton.style.display = 'none';
                 return;
             }
 
@@ -603,9 +618,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update'])) {
                 `IP: ${item.ip || '-'} • User: ${item.user || '-'} • Status: ${item.status || 'UNKNOWN'}`;
 
             if (note) {
-                note.textContent =
-                    `Terhubung otomatis ke ID PPPoE ${item.id || '-'}. Semua informasi jaringan hanya dibaca dari PPPoE.`;
+                note.textContent = `${item.match_method === 'manual' ? 'Terhubung manual' : 'Terhubung otomatis'} ke ID PPPoE ${item.id || '-'}. Semua informasi jaringan hanya dibaca dari PPPoE.`;
             }
+            if (chooseButton) chooseButton.textContent = item.match_method === 'manual' ? 'Ganti PPPoE Manual' : 'Pilih PPPoE Manual';
+            if (disconnectButton) disconnectButton.style.display = item.match_method === 'manual' ? 'inline-flex' : 'none';
         } catch (error) {
             xBox.textContent = 'Tidak tersedia';
             yBox.textContent = 'Tidak tersedia';
@@ -615,6 +631,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update'])) {
             }
         }
     }
+
+    function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]));
+    }
+
+    async function saveManual(action, pppoeId = '') {
+        const response = await fetch('pppoe_manual_connect.php', {
+            method: 'POST', headers: {'Content-Type':'application/json','X-CSRF-Token':csrfToken},
+            body: JSON.stringify({action, billing_id: billingCustomerId, pppoe_id: pppoeId})
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.success) throw new Error(payload.message || 'Proses koneksi manual gagal.');
+        alert(payload.message);
+        if (candidateList) candidateList.style.display = 'none';
+        await loadReadonlyPppoeInfo();
+    }
+
+    if (chooseButton && candidateList) chooseButton.addEventListener('click', async function () {
+        candidateList.style.display = 'block';
+        candidateList.textContent = 'Mencari kandidat PPPoE dari wilayah yang sama...';
+        try {
+            const response = await fetch(`pppoe_manual_connect.php?billing_id=${billingCustomerId}`, {cache:'no-store'});
+            const payload = await response.json();
+            if (!response.ok || !payload.success) throw new Error(payload.message || 'Kandidat tidak dapat dibaca.');
+            if (!payload.candidates.length) { candidateList.textContent = 'Tidak ada kandidat PPPoE pada wilayah yang sama.'; return; }
+            candidateList.innerHTML = '<b>Pilih salah satu kandidat:</b>' + payload.candidates.map(item => {
+                const distance = item.distance === null ? 'jarak tidak tersedia' : `${item.distance} meter`;
+                return `<div style="margin-top:8px;padding:9px;border:1px solid #e2e8f0;border-radius:7px;display:flex;justify-content:space-between;gap:8px;align-items:center"><span><b>${escapeHtml(item.user || item.lokasi || item.id)}</b><br><small>${escapeHtml(item.lokasi)} • ${escapeHtml(item.status)} • kemiripan ${escapeHtml(item.score)}% • ${escapeHtml(distance)}</small></span><button type="button" class="btn btn-primary" data-pppoe-id="${escapeHtml(item.id)}">Hubungkan</button></div>`;
+            }).join('');
+            candidateList.querySelectorAll('[data-pppoe-id]').forEach(button => button.addEventListener('click', () => {
+                if (confirm('Hubungkan pelanggan ini ke PPPoE yang dipilih?')) saveManual('connect', button.dataset.pppoeId).catch(error => alert(error.message));
+            }));
+        } catch (error) { candidateList.textContent = error.message; }
+    });
+    if (disconnectButton) disconnectButton.addEventListener('click', function () {
+        if (confirm('Putuskan pilihan manual dan gunakan matching otomatis kembali?')) saveManual('disconnect').catch(error => alert(error.message));
+    });
 
     loadReadonlyPppoeInfo();
 })();

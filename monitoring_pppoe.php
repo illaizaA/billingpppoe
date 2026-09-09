@@ -2,6 +2,8 @@
 session_start();
 require_once __DIR__ . '/helpers_salam.php';
 salamRequireLogin();
+$pppoeManualCsrf = $_SESSION['pppoe_manual_csrf'] ?? bin2hex(random_bytes(24));
+$_SESSION['pppoe_manual_csrf'] = $pppoeManualCsrf;
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -21,6 +23,8 @@ salamRequireLogin();
         .search{margin-top:16px;position:relative}.search i{position:absolute;left:11px;top:12px;color:#8795a1}.search input{width:100%;padding:10px 10px 10px 34px;border:1px solid #dce5ec;border-radius:8px;outline:0}.notice{font-size:12px;line-height:1.5;color:#64748b;background:#f8fafc;border-radius:8px;padding:10px;margin-top:14px}.statusline{font-size:12px;margin-top:12px;color:#64748b}.error{display:none;background:#fff1f0;color:#b42318;border:1px solid #ffd5d2;border-radius:8px;padding:10px;margin-top:12px;line-height:1.4}.map-wrap{position:relative;min-width:0;min-height:0}#map{height:100%;width:100%;background:#e9eef2}.loading{position:absolute;z-index:1000;left:50%;top:20px;transform:translateX(-50%);background:#fff;padding:10px 14px;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.15);font-size:13px}
         .pppoe-marker{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;color:#fff;border:2px solid #fff;box-shadow:0 2px 7px rgba(0,0,0,.35);font-size:13px}.pppoe-marker.online{background:#27ae60}.pppoe-marker.offline{background:#e74c3c}.pppoe-marker.unknown{background:#7f8c8d}
         .leaflet-popup-content-wrapper{border-radius:12px}.leaflet-popup-content{margin:12px;width:285px!important}.customer-card{font-size:12px}.house-photo{width:100%;height:145px;object-fit:cover;border-radius:9px;background:#eef2f5;margin-bottom:9px}.photo-empty{height:90px;border-radius:9px;background:#f1f5f9;display:grid;place-items:center;color:#94a3b8;margin-bottom:9px}.customer-title{font-size:15px;font-weight:800;color:#1f2937;margin-bottom:6px}.network-row{padding:7px 8px;background:#f8fafc;border-radius:7px;margin-bottom:7px}.detail-grid{display:grid;grid-template-columns:120px 1fr;gap:4px 8px}.detail-grid b{color:#475569}.online-text{color:#16804b;font-weight:800}.offline-text{color:#c0392b;font-weight:800}.unlinked{background:#fff8e6;border:1px solid #ffe4a8;color:#8a5a00;border-radius:8px;padding:9px;line-height:1.45;margin-top:8px}
+        .manual-action{margin-top:9px;display:flex;gap:7px}.manual-action button{border:0;border-radius:6px;padding:7px 9px;background:#2563eb;color:#fff;font-weight:700;cursor:pointer}.manual-action .disconnect{background:#64748b}
+        .manual-modal{display:none;position:fixed;inset:0;z-index:3000;background:rgba(15,23,42,.55);padding:18px;align-items:center;justify-content:center}.manual-modal.open{display:flex}.manual-panel{width:min(600px,100%);max-height:82vh;overflow:auto;background:#fff;border-radius:12px;padding:18px;box-shadow:0 20px 45px rgba(0,0,0,.25)}.manual-panel-head{display:flex;justify-content:space-between;gap:10px;align-items:center}.manual-close{border:0;background:transparent;font-size:24px;cursor:pointer}.manual-candidate{display:flex;justify-content:space-between;gap:10px;align-items:center;border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-top:9px}.manual-candidate button{border:0;border-radius:6px;padding:7px 10px;background:#2563eb;color:#fff;font-weight:700;cursor:pointer}
         @media(max-width:800px){.header{height:auto;min-height:72px;padding:12px 15px;align-items:flex-start}.header h1{font-size:17px}.page{height:calc(100% - 96px);grid-template-columns:1fr;grid-template-rows:auto 1fr}.sidebar{padding:10px;border-right:0;border-bottom:1px solid #e7edf2}.brand,.notice{display:none}.stats{grid-template-columns:repeat(3,1fr)}.stat.total{grid-column:auto}.stat{padding:8px}.stat strong{font-size:18px}.search{margin-top:8px}.map-wrap{min-height:500px}}
     </style>
 </head>
@@ -50,8 +54,16 @@ salamRequireLogin();
         <div id="map"></div>
     </main>
 </div>
+<div id="manualModal" class="manual-modal" role="dialog" aria-modal="true" aria-labelledby="manualTitle">
+    <div class="manual-panel">
+        <div class="manual-panel-head"><h3 id="manualTitle">Pilih Pelanggan Billing</h3><button id="manualClose" class="manual-close" type="button" aria-label="Tutup">&times;</button></div>
+        <p id="manualDescription">Memuat kandidat...</p>
+        <div id="manualCandidates"></div>
+    </div>
+</div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 <script>
+const manualCsrf = <?= json_encode($pppoeManualCsrf) ?>;
 const map = L.map('map', {zoomControl:true}).setView([-7.85,110.48], 12);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom:19,
@@ -87,15 +99,42 @@ function popupHtml(item){
             <b>Koordinat X</b><span>${esc(x)}</span>
             <b>Koordinat Y</b><span>${esc(y)}</span>
             <b>Alamat</b><span>${esc(b.alamat || '-')}</span>
-        </div>`;
+        </div><div class="manual-action"><button type="button" onclick="openManualPicker('${esc(item.id)}')">${item.match_method==='manual'?'Ganti pasangan':'Pilih pasangan manual'}</button>${item.match_method==='manual'?`<button type="button" class="disconnect" onclick="disconnectManual(${Number(b.id)})">Putuskan manual</button>`:''}</div>`;
     } else {
-        detail=`${photo}<div class="unlinked"><b>Belum terhubung otomatis ke data Billing.</b><br>Billing tetap menampilkan posisi dan status asli dari PPPoE. Profil Billing akan muncul jika ID atau nama dapat dicocokkan saat halaman dibuka.</div>`;
+        detail=`${photo}<div class="unlinked"><b>Belum terhubung otomatis ke data Billing.</b><br>Pilih pelanggan Billing dari wilayah yang sama jika hasil otomatis belum pasti.</div><div class="manual-action"><button type="button" onclick="openManualPicker('${esc(item.id)}')">Pilih pelanggan Billing</button></div>`;
     }
     return `<div class="customer-card">
         <div class="network-row"><b>${esc(item.user || item.lokasi || '-')}</b><br>${esc(item.lokasi || '')}<br>IP: ${esc(item.ip || '-')}<br>Status: <span class="${statusClass}">${esc(status)}</span></div>
         ${detail}
     </div>`;
 }
+const manualModal=document.getElementById('manualModal');
+const manualCandidates=document.getElementById('manualCandidates');
+document.getElementById('manualClose').addEventListener('click',()=>manualModal.classList.remove('open'));
+manualModal.addEventListener('click',event=>{if(event.target===manualModal)manualModal.classList.remove('open');});
+async function manualPost(body){
+    const response=await fetch('pppoe_manual_connect.php',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':manualCsrf},body:JSON.stringify(body)});
+    const payload=await response.json();
+    if(!response.ok||!payload.success)throw new Error(payload.message||'Koneksi manual gagal.');
+    alert(payload.message);manualModal.classList.remove('open');await loadData();
+}
+async function openManualPicker(pppoeId){
+    manualModal.classList.add('open');manualCandidates.textContent='Memuat kandidat dari wilayah yang sama...';
+    try{
+        const response=await fetch(`pppoe_manual_connect.php?pppoe_id=${encodeURIComponent(pppoeId)}`,{cache:'no-store'});
+        const payload=await response.json();
+        if(!response.ok||!payload.success)throw new Error(payload.message||'Kandidat tidak dapat dibaca.');
+        if(!payload.candidates.length){manualCandidates.textContent='Tidak ada pelanggan Billing pada wilayah yang sama.';return;}
+        manualCandidates.innerHTML=payload.candidates.map(item=>{
+            const distance=item.distance===null?'jarak tidak tersedia':`${item.distance} meter`;
+            return `<div class="manual-candidate"><span><b>${esc(item.nama||item.id_pelanggan)}</b><br><small>${esc(item.id_pelanggan)} • KTP: ${esc(item.nama_ktp||'-')} • ${esc(item.alamat)} • kemiripan ${esc(item.score)}% • ${esc(distance)}</small></span><button type="button" data-billing-id="${Number(item.id)}">Hubungkan</button></div>`;
+        }).join('');
+        manualCandidates.querySelectorAll('[data-billing-id]').forEach(button=>button.addEventListener('click',()=>{
+            if(confirm('Hubungkan PPPoE ini dengan pelanggan Billing yang dipilih?'))manualPost({action:'connect',billing_id:Number(button.dataset.billingId),pppoe_id:pppoeId}).catch(error=>alert(error.message));
+        }));
+    }catch(error){manualCandidates.textContent=error.message;}
+}
+function disconnectManual(billingId){if(confirm('Putuskan pilihan manual dan gunakan matching otomatis kembali?'))manualPost({action:'disconnect',billing_id:Number(billingId)}).catch(error=>alert(error.message));}
 function matches(item, term){
     if(!term) return true;
     const b=item.billing||{};
