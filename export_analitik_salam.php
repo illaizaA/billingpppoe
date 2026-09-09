@@ -696,12 +696,36 @@ try {
         'status' => $statusDetailSheet,
     ];
 
-    $suffix = str_replace('-', '_', $range['awal']) . '_sd_' . str_replace('-', '_', $range['akhir']);
-    $scopeFile = preg_replace('/[^A-Za-z0-9]+/', '_', strtoupper($scopeLabel));
+    // Nama file export dibuat singkat, formal, dan mudah dikenali pengguna non-IT.
+    // Contoh: "Pelanggan Rajin Bayar - Apr-Sep 2026.xlsx"
+    $bulanSingkat = [
+        1 => 'Jan', 2 => 'Feb', 3 => 'Mar', 4 => 'Apr', 5 => 'Mei', 6 => 'Jun',
+        7 => 'Jul', 8 => 'Agu', 9 => 'Sep', 10 => 'Okt', 11 => 'Nov', 12 => 'Des',
+    ];
+    $awalParts = array_map('intval', explode('-', $range['awal']));
+    $akhirParts = array_map('intval', explode('-', $range['akhir']));
+    $awalTahun = $awalParts[0] ?? (int)date('Y');
+    $awalBulan = $awalParts[1] ?? (int)date('n');
+    $akhirTahun = $akhirParts[0] ?? $awalTahun;
+    $akhirBulan = $akhirParts[1] ?? $awalBulan;
+
+    if ($awalTahun === $akhirTahun && $awalBulan === $akhirBulan) {
+        $periodeFile = ($bulanSingkat[$awalBulan] ?? '') . ' ' . $awalTahun;
+    } elseif ($awalTahun === $akhirTahun) {
+        $periodeFile = ($bulanSingkat[$awalBulan] ?? '') . '-' . ($bulanSingkat[$akhirBulan] ?? '') . ' ' . $awalTahun;
+    } else {
+        $periodeFile = ($bulanSingkat[$awalBulan] ?? '') . ' ' . $awalTahun
+            . '-' . ($bulanSingkat[$akhirBulan] ?? '') . ' ' . $akhirTahun;
+    }
+
+    $scopeFile = '';
+    if (empty($scope['is_all'])) {
+        $scopeFile = ' - ' . ucwords(strtolower($scopeLabel));
+    }
 
     if ($mode === 'detail') {
         $sheet = $detailSheet($detailType, $detailKey);
-        analitikXlsxDownload([$sheet], 'Detail_Analitik_' . $suffix . '_' . $scopeFile);
+        analitikXlsxDownload([$sheet], 'Detail Analitik - ' . $periodeFile . $scopeFile);
     }
 
     if ($mode === 'panel') {
@@ -716,12 +740,16 @@ try {
         $resultSheet = $sheetBuilders[$analytic]();
         $detailSheetForPanel = $detailBuilders[$analytic]();
         $nameMap = [
-            'trend'=>'Perkembangan_Pembayaran', 'unpaid'=>'Belum_Bayar', 'outstanding'=>'Tunggakan',
-            'top'=>'Pelanggan_Rajin_Bayar', 'financial'=>'Kondisi_Pembayaran', 'status'=>'Status_Tagihan',
+            'trend' => 'Perkembangan Pembayaran',
+            'unpaid' => !empty($scope['is_all']) ? 'Belum Bayar per Wilayah' : 'Prioritas Belum Bayar',
+            'outstanding' => !empty($scope['is_all']) ? 'Tunggakan per Wilayah' : 'Tunggakan per Bulan',
+            'top' => 'Pelanggan Rajin Bayar',
+            'financial' => 'Kondisi Pembayaran',
+            'status' => 'Status Pembayaran',
         ];
         analitikXlsxDownload(
             [$resultSheet, $detailSheetForPanel],
-            'Analitik_dan_Rincian_' . ($nameMap[$analytic] ?? 'Billing') . '_' . $suffix . '_' . $scopeFile
+            ($nameMap[$analytic] ?? 'Analitik Billing') . ' - ' . $periodeFile . $scopeFile
         );
     }
 
@@ -758,7 +786,7 @@ try {
         $sheets[] = $withSheetName($statusDetailSheet(), 'Detail Status Pembayaran');
     }
 
-    analitikXlsxDownload($sheets, 'Analitik_dan_Rincian_Lengkap_' . $suffix . '_' . $scopeFile);
+    analitikXlsxDownload($sheets, 'Analitik Billing - ' . $periodeFile . $scopeFile);
 
 } catch (Throwable $e) {
     http_response_code(400);
