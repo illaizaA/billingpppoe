@@ -2,9 +2,203 @@
 session_start();
 require_once __DIR__ . '/db_salam.php';
 require_once __DIR__ . '/helpers_salam.php';
+require_once __DIR__ . '/config_monitoring_pppoe.php';
+require_once __DIR__ . '/pppoe_manual_helper.php';
 salamRequireSuperAdmin();
 
 date_default_timezone_set('Asia/Jakarta');
+
+/**
+ * Mengambil koordinat PPPoE untuk pelanggan Billing tanpa mengubah data apa pun.
+ * Prioritas pasangan dibuat sama dengan halaman monitoring:
+ * 1. pasangan manual (pppoe_user), 2. nama pelanggan + wilayah,
+ * 3. nama KTP + wilayah, 4. koordinat Billing dalam radius 30 meter.
+ *
+ * Jika endpoint PPPoE sedang tidak dapat dihubungi, export tetap dilanjutkan
+ * dan kolom koordinat PPPoE akan berisi tanda "-".
+ */
+function arsipKoordinatPppoePerPelanggan(mysqli $koneksi): array
+{
+    try {
+        $pppoes = salamManualFetchPppoe();
+    } catch (Throwable $e) {
+        return [];
+    }
+
+    $result = $koneksi->query(
+        "SELECT p.id, p.nama, p.alamat,
+                COALESCE(d.nama_ktp, '') AS nama_ktp,
+                COALESCE(d.pppoe_user, '') AS pppoe_user,
+                d.koordinat_x, d.koordinat_y
+         FROM pelanggan_salam p
+         LEFT JOIN pelanggan_detail_salam d ON d.pelanggan_id = p.id
+         ORDER BY p.id"
+    );
+    if (!$result) return [];
+
+    $billingRows = [];
+    while ($row = $result->fetch_assoc()) {
+        $row['id'] = (int) ($row['id'] ?? 0);
+        if ($row['id'] > 0) $billingRows[] = $row;
+    }
+    $result->free();
+
+    $pppoeIndexById = [];
+    foreach ($pppoes as $pppoeIndex => $pppoeRow) {
+        if (!is_array($pppoeRow)) continue;
+        $pppoeId = salamManualPppoeId($pppoeRow);
+        if ($pppoeId !== '') $pppoeIndexById[$pppoeId] = (int) $pppoeIndex;
+    }
+
+    $matches = [];
+    $usedBillingIds = [];
+    $usedPppoeIndexes = [];
+
+    // Pasangan manual selalu menjadi prioritas pertama.
+    foreach ($billingRows as $billingRow) {
+        $billingId = (int) $billingRow['id'];
+        $manualPppoeId = trim((string) ($billingRow['pppoe_user'] ?? ''));
+        if ($manualPppoeId === '' || !isset($pppoeIndexById[$manualPppoeId])) continue;
+
+        $pppoeIndex = $pppoeIndexById[$manualPppoeId];
+        if (isset($usedPppoeIndexes[$pppoeIndex])) continue;
+
+        $matches[$pppoeIndex] = $billingRow;
+        $usedBillingIds[$billingId] = true;
+        $usedPppoeIndexes[$pppoeIndex] = true;
+    }
+
+    // Index nama + wilayah untuk pelanggan yang belum mempunyai pasangan manual valid.
+    $byCustomerNameAddress = [];
+    $byKtpNameAddress = [];
+    foreach ($billingRows as $billingRow) {
+        $billingId = (int) $billingRow['id'];
+        if (isset($usedBillingIds[$billingId])) continue;
+
+        $address = salamManualNormalize($billingRow['alamat'] ?? '');
+        if ($address === '') continue;
+
+        $customerName = salamManualNormalize($billingRow['nama'] ?? '');
+        if ($customerName !== '') {
+            $byCustomerNameAddress[$customerName . '|' . $address][$billingId] = $billingRow;
+        }
+
+        $ktpName = salamManualNormalize($billingRow['nama_ktp'] ?? '');
+        if ($ktpName !== '') {
+            $byKtpNameAddress[$ktpName . '|' . $address][$billingId] = $billingRow;
+        }
+    }
+
+    foreach ($pppoes as $pppoeIndex => $pppoeRow) {
+        $pppoeIndex = (int) $pppoeIndex;
+        if (!is_array($pppoeRow) || isset($usedPppoeIndexes[$pppoeIndex])) continue;
+
+        $pairs = salamManualPairs($pppoeRow);
+        if (!$pairs) continue;
+
+        $candidates = [];
+        foreach ($pairs as $pair) {
+            $key = $pair['name'] . '|' . $pair['address'];
+            foreach ($byCustomerNameAddress[$key] ?? [] as $billingId => $billingRow) {
+                $candidates[(int) $billingId] = $billingRow;
+            }
+        }
+
+        // Bila tahap nama pelanggan ambigu, jangan menebak dan jangan turun ke Nama KTP.
+        if (count($candidates) > 1) continue;
+
+        if (!$candidates) {
+            foreach ($pairs as $pair) {
+                $key = $pair['name'] . '|' . $pair['address'];
+                foreach ($byKtpNameAddress[$key] ?? [] as $billingId => $billingRow) {
+                    $candidates[(int) $billingId] = $billingRow;
+                }
+            }
+        }
+
+        if (count($candidates) !== 1) continue;
+
+        $billingRow = array_values($candidates)[0];
+        $billingId = (int) $billingRow['id'];
+        if (isset($usedBillingIds[$billingId])) continue;
+
+        $matches[$pppoeIndex] = $billingRow;
+        $usedBillingIds[$billingId] = true;
+        $usedPppoeIndexes[$pppoeIndex] = true;
+    }
+
+    // Fallback terakhir: satu-satunya titik PPPoE pada wilayah sama dalam radius 30 meter.
+    $coordinateClaims = [];
+    foreach ($billingRows as $billingRow) {
+        $billingId = (int) $billingRow['id'];
+        if (isset($usedBillingIds[$billingId])) continue;
+
+        $billingLongitude = $billingRow['koordinat_x'] ?? null;
+        $billingLatitude = $billingRow['koordinat_y'] ?? null;
+        $billingAddress = salamManualNormalize($billingRow['alamat'] ?? '');
+        if (!is_numeric($billingLongitude) || !is_numeric($billingLatitude) || $billingAddress === '') continue;
+
+        $candidates = [];
+        foreach ($pppoes as $pppoeIndex => $pppoeRow) {
+            $pppoeIndex = (int) $pppoeIndex;
+            if (!is_array($pppoeRow) || isset($usedPppoeIndexes[$pppoeIndex])) continue;
+
+            $sameAddress = false;
+            foreach (salamManualPairs($pppoeRow) as $pair) {
+                if (($pair['address'] ?? '') === $billingAddress) {
+                    $sameAddress = true;
+                    break;
+                }
+            }
+            if (!$sameAddress) continue;
+
+            $pppoeLatitude = $pppoeRow['latitude'] ?? $pppoeRow['lat'] ?? null;
+            $pppoeLongitude = $pppoeRow['longitude'] ?? $pppoeRow['lng'] ?? $pppoeRow['lon'] ?? null;
+            if (!is_numeric($pppoeLatitude) || !is_numeric($pppoeLongitude)) continue;
+
+            $distance = salamManualDistance(
+                (float) $billingLatitude,
+                (float) $billingLongitude,
+                (float) $pppoeLatitude,
+                (float) $pppoeLongitude
+            );
+            if ($distance <= 30.0) $candidates[] = $pppoeIndex;
+        }
+
+        if (count($candidates) === 1) {
+            $coordinateClaims[$candidates[0]][$billingId] = $billingRow;
+        }
+    }
+
+    foreach ($coordinateClaims as $pppoeIndex => $billingClaims) {
+        $pppoeIndex = (int) $pppoeIndex;
+        if (count($billingClaims) !== 1 || isset($usedPppoeIndexes[$pppoeIndex])) continue;
+        $billingRow = array_values($billingClaims)[0];
+        $billingId = (int) $billingRow['id'];
+        if (isset($usedBillingIds[$billingId])) continue;
+
+        $matches[$pppoeIndex] = $billingRow;
+        $usedBillingIds[$billingId] = true;
+        $usedPppoeIndexes[$pppoeIndex] = true;
+    }
+
+    $coordinates = [];
+    foreach ($matches as $pppoeIndex => $billingRow) {
+        $pppoeRow = $pppoes[(int) $pppoeIndex] ?? null;
+        if (!is_array($pppoeRow)) continue;
+
+        $latitude = $pppoeRow['latitude'] ?? $pppoeRow['lat'] ?? null;
+        $longitude = $pppoeRow['longitude'] ?? $pppoeRow['lng'] ?? $pppoeRow['lon'] ?? null;
+        if (!is_numeric($latitude) || !is_numeric($longitude)) continue;
+
+        $coordinates[(int) $billingRow['id']] = [
+            'longitude' => (string) $longitude,
+            'latitude' => (string) $latitude,
+        ];
+    }
+
+    return $coordinates;
+}
 
 function arsipBind(mysqli_stmt $stmt, string $types, array &$params): void
 {
@@ -100,7 +294,8 @@ function arsipBuatXlsx(array $pelanggan, array $transaksi): string
     $pelangganHeaders = [
         'No', 'ID Pelanggan', 'Kode Pelanggan', 'Nama Pelanggan', 'Nama KTP', 'NIK',
         'Nomor WhatsApp', 'Alamat/Wilayah', 'Paket', 'Tarif Langganan', 'Status Pelanggan',
-        'Tanggal Daftar', 'Koordinat X / Longitude', 'Koordinat Y / Latitude'
+        'Tanggal Daftar', 'Koordinat X / Longitude PPPoE', 'Koordinat Y / Latitude PPPoE',
+        'Koordinat X / Longitude Admin', 'Koordinat Y / Latitude Admin'
     ];
     $pelangganRows = [];
     foreach ($pelanggan as $index => $row) {
@@ -117,6 +312,8 @@ function arsipBuatXlsx(array $pelanggan, array $transaksi): string
             $row['tarif_langganan'] ?? 0,
             $row['status_pelanggan'] ?: '-',
             $row['tanggal_daftar'] ?: '-',
+            isset($row['pppoe_longitude']) && $row['pppoe_longitude'] !== '' ? $row['pppoe_longitude'] : '-',
+            isset($row['pppoe_latitude']) && $row['pppoe_latitude'] !== '' ? $row['pppoe_latitude'] : '-',
             $row['koordinat_x'] !== null && $row['koordinat_x'] !== '' ? $row['koordinat_x'] : '-',
             $row['koordinat_y'] !== null && $row['koordinat_y'] !== '' ? $row['koordinat_y'] : '-',
         ];
@@ -258,6 +455,16 @@ $result = $stmt->get_result();
 $pelanggan = [];
 while ($row = $result->fetch_assoc()) $pelanggan[] = $row;
 $stmt->close();
+
+// Gabungkan koordinat PPPoE secara read-only ke data yang akan diekspor.
+// Kolom koordinat Billing (input admin) tetap disimpan terpisah dan tidak ditimpa.
+$pppoeCoordinates = arsipKoordinatPppoePerPelanggan($koneksi);
+foreach ($pelanggan as &$pelangganRow) {
+    $coordinate = $pppoeCoordinates[(int) ($pelangganRow['id'] ?? 0)] ?? [];
+    $pelangganRow['pppoe_longitude'] = $coordinate['longitude'] ?? null;
+    $pelangganRow['pppoe_latitude'] = $coordinate['latitude'] ?? null;
+}
+unset($pelangganRow);
 
 $transaksi = [];
 $ids = array_map(fn($row) => (int) $row['id'], $pelanggan);
