@@ -19,7 +19,9 @@ try {
     $detailType = strtolower(trim((string) ($_GET['type'] ?? '')));
     $detailKey = trim((string) ($_GET['key'] ?? ''));
 
-    $periodLabel = analitikPeriodLabel($range['awal']) . ' - ' . analitikPeriodLabel($range['akhir']);
+    $periodLabel = $range['filter_tipe'] === 'tanggal'
+        ? analitikDateLabel($range['tanggal_awal']) . ' - ' . analitikDateLabel($range['tanggal_akhir'])
+        : analitikPeriodLabel($range['awal']) . ' - ' . analitikPeriodLabel($range['akhir']);
     $scopeLabel = (string) ($scope['label'] ?? 'SEMUA WILAYAH');
     $meta = [
         ['label' => 'Periode', 'value' => $periodLabel],
@@ -709,7 +711,10 @@ try {
     $akhirTahun = $akhirParts[0] ?? $awalTahun;
     $akhirBulan = $akhirParts[1] ?? $awalBulan;
 
-    if ($awalTahun === $akhirTahun && $awalBulan === $akhirBulan) {
+    if ($range['filter_tipe'] === 'tanggal') {
+        $periodeFile = date('d-m-Y', strtotime($range['tanggal_awal']))
+            . ' - ' . date('d-m-Y', strtotime($range['tanggal_akhir']));
+    } elseif ($awalTahun === $akhirTahun && $awalBulan === $akhirBulan) {
         $periodeFile = ($bulanSingkat[$awalBulan] ?? '') . ' ' . $awalTahun;
     } elseif ($awalTahun === $akhirTahun) {
         $periodeFile = ($bulanSingkat[$awalBulan] ?? '') . '-' . ($bulanSingkat[$akhirBulan] ?? '') . ' ' . $awalTahun;

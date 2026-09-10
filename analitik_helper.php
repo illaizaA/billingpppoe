@@ -84,6 +84,27 @@ function analitikResolvePeriodRange(array $source): array
     $defaultEnd = $now->format('Y-m');
     $defaultStart = $now->modify('-5 months')->format('Y-m');
 
+    $filterTipe = strtolower(trim((string) ($source['filter_tipe'] ?? 'bulan')));
+    if (!in_array($filterTipe, ['bulan', 'tanggal'], true)) {
+        $filterTipe = 'bulan';
+    }
+
+    $validDate = static function (string $value): bool {
+        $date = DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+        return $date !== false && $date->format('Y-m-d') === $value;
+    };
+
+    $defaultDateStart = $defaultStart . '-01';
+    $defaultDateEnd = $now->modify('last day of this month')->format('Y-m-d');
+    $tanggalAwal = trim((string) ($source['tanggal_awal'] ?? $defaultDateStart));
+    $tanggalAkhir = trim((string) ($source['tanggal_akhir'] ?? $defaultDateEnd));
+    if (!$validDate($tanggalAwal)) $tanggalAwal = $defaultDateStart;
+    if (!$validDate($tanggalAkhir)) $tanggalAkhir = $defaultDateEnd;
+
+    if (strcmp($tanggalAwal, $tanggalAkhir) > 0) {
+        [$tanggalAwal, $tanggalAkhir] = [$tanggalAkhir, $tanggalAwal];
+    }
+
     $bulanAwal = trim((string) ($source['bulan_awal'] ?? substr($defaultStart, 5, 2)));
     $tahunAwal = trim((string) ($source['tahun_awal'] ?? substr($defaultStart, 0, 4)));
     $bulanAkhir = trim((string) ($source['bulan_akhir'] ?? substr($defaultEnd, 5, 2)));
@@ -92,25 +113,56 @@ function analitikResolvePeriodRange(array $source): array
     $validMonth = static fn(string $m): bool => (bool) preg_match('/^(0?[1-9]|1[0-2])$/', $m);
     $validYear = static fn(string $y): bool => (bool) preg_match('/^\d{4}$/', $y);
 
-    $awal = ($validMonth($bulanAwal) && $validYear($tahunAwal))
-        ? sprintf('%04d-%02d', (int) $tahunAwal, (int) $bulanAwal)
-        : $defaultStart;
-    $akhir = ($validMonth($bulanAkhir) && $validYear($tahunAkhir))
-        ? sprintf('%04d-%02d', (int) $tahunAkhir, (int) $bulanAkhir)
-        : $defaultEnd;
+    if ($filterTipe === 'tanggal') {
+        // Data tagihan disimpan per periode bulanan. Rentang tanggal diterjemahkan
+        // menjadi seluruh bulan yang tersentuh agar tagihan lunas dan belum lunas
+        // tetap dihitung dengan dasar yang sama pada semua panel.
+        $awal = substr($tanggalAwal, 0, 7);
+        $akhir = substr($tanggalAkhir, 0, 7);
+    } else {
+        $awal = ($validMonth($bulanAwal) && $validYear($tahunAwal))
+            ? sprintf('%04d-%02d', (int) $tahunAwal, (int) $bulanAwal)
+            : $defaultStart;
+        $akhir = ($validMonth($bulanAkhir) && $validYear($tahunAkhir))
+            ? sprintf('%04d-%02d', (int) $tahunAkhir, (int) $bulanAkhir)
+            : $defaultEnd;
+    }
 
     if (strcmp($awal, $akhir) > 0) {
         [$awal, $akhir] = [$akhir, $awal];
     }
 
+    if ($filterTipe === 'bulan') {
+        $tanggalAwal = $awal . '-01';
+        $akhirDate = DateTimeImmutable::createFromFormat('!Y-m-d', $akhir . '-01');
+        $tanggalAkhir = $akhirDate
+            ? $akhirDate->modify('last day of this month')->format('Y-m-d')
+            : $defaultDateEnd;
+    }
+
     return [
+        'filter_tipe' => $filterTipe,
         'awal' => $awal,
         'akhir' => $akhir,
+        'tanggal_awal' => $tanggalAwal,
+        'tanggal_akhir' => $tanggalAkhir,
         'bulan_awal' => substr($awal, 5, 2),
         'tahun_awal' => (int) substr($awal, 0, 4),
         'bulan_akhir' => substr($akhir, 5, 2),
         'tahun_akhir' => (int) substr($akhir, 0, 4),
     ];
+}
+
+function analitikDateLabel(string $ymd): string
+{
+    static $bulan = [
+        1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
+        5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
+        9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember',
+    ];
+    $date = DateTimeImmutable::createFromFormat('!Y-m-d', $ymd);
+    if (!$date || $date->format('Y-m-d') !== $ymd) return $ymd;
+    return $date->format('j') . ' ' . ($bulan[(int) $date->format('n')] ?? $date->format('m')) . ' ' . $date->format('Y');
 }
 
 function analitikPeriodeSequence(string $awal, string $akhir): array

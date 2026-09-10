@@ -44,7 +44,9 @@ $regionComparison = $analitik['region_comparison'] ?? [];
 $priorityCustomers = array_slice(array_values($unpaidCustomers), 0, 4);
 $priorityOutstanding = array_sum(array_map(static fn($r) => (float)($r['total_tunggakan'] ?? 0), $unpaidCustomers));
 
-$rangeLabel = analitikPeriodLabel($range['awal']) . ' - ' . analitikPeriodLabel($range['akhir']);
+$rangeLabel = $range['filter_tipe'] === 'tanggal'
+    ? analitikDateLabel($range['tanggal_awal']) . ' - ' . analitikDateLabel($range['tanggal_akhir'])
+    : analitikPeriodLabel($range['awal']) . ' - ' . analitikPeriodLabel($range['akhir']);
 
 $trendRates = array_column($trend, 'persen');
 $trendMax = max(100, (int) ceil((max($trendRates ?: [0]) + 5) / 10) * 10);
@@ -96,7 +98,7 @@ $maxOutstanding = max(1, ...array_map(fn($r)=>(float)$r['value'], $outstanding ?
         .header{background:linear-gradient(135deg,var(--secondary),#1a2530);color:#fff;padding:14px clamp(16px,3vw,30px);display:flex;justify-content:space-between;align-items:center;gap:12px;position:sticky;top:0;z-index:50;box-shadow:0 4px 12px rgba(0,0,0,.1)}
         .header h1{font-size:clamp(18px,2vw,23px);margin:0;display:flex;align-items:center;gap:10px}.header-actions{display:flex;gap:9px;flex-wrap:wrap;justify-content:flex-end}.nav-btn{color:#fff;text-decoration:none;padding:9px 13px;border-radius:7px;font-weight:650;font-size:13px;display:inline-flex;align-items:center;gap:7px}.back{background:var(--primary)}.report{background:var(--purple)}.logout{background:var(--danger)}
         .container{max-width:1560px;margin:auto;padding:25px clamp(14px,3vw,34px) 40px}.page-head{display:flex;justify-content:space-between;align-items:flex-start;gap:15px;flex-wrap:wrap;margin-bottom:15px}.page-head h2{margin:0;color:var(--secondary);font-size:25px}.page-head p{margin:5px 0 0;color:var(--muted);font-size:13px}.scope-badge{background:#eef6ff;color:#21618c;border:1px solid #cfe4f6;border-radius:999px;padding:8px 12px;font-size:12px;font-weight:700}
-        .filter-panel{background:#fff;border:1px solid var(--border);border-radius:14px;padding:16px 18px;box-shadow:0 6px 18px rgba(31,41,55,.05);margin-bottom:18px}.filter-grid{display:grid;grid-template-columns:1fr 1fr minmax(190px,.8fr) auto;gap:12px;align-items:end}.field label{display:block;font-size:12px;font-weight:700;color:#4a5568;margin-bottom:6px}.period-pair{display:grid;grid-template-columns:1.2fr .8fr;gap:7px}select,.locked-field{width:100%;min-height:41px;border:1px solid #dce4ec;border-radius:8px;background:#fff;padding:8px 10px;font-size:14px;color:#263241}.locked-field{display:flex;align-items:center;background:#f7fafc;font-weight:700}.filter-actions{display:flex;gap:8px}.btn{border:0;border-radius:8px;padding:10px 14px;font-weight:700;cursor:pointer;min-height:41px}.btn-primary{background:var(--primary);color:#fff}.btn-reset{background:#edf2f7;color:#425466;text-decoration:none;display:inline-flex;align-items:center}
+        .filter-panel{background:#fff;border:1px solid var(--border);border-radius:14px;padding:16px 18px;box-shadow:0 6px 18px rgba(31,41,55,.05);margin-bottom:18px}.filter-grid{display:grid;grid-template-columns:minmax(165px,.65fr) 1fr 1fr minmax(190px,.8fr) auto;gap:12px;align-items:end}.field label{display:block;font-size:12px;font-weight:700;color:#4a5568;margin-bottom:6px}.period-pair{display:grid;grid-template-columns:1.2fr .8fr;gap:7px}select,input[type="date"],.locked-field{width:100%;min-height:41px;border:1px solid #dce4ec;border-radius:8px;background:#fff;padding:8px 10px;font-size:14px;color:#263241}.locked-field{display:flex;align-items:center;background:#f7fafc;font-weight:700}.filter-actions{display:flex;gap:8px}.btn{border:0;border-radius:8px;padding:10px 14px;font-weight:700;cursor:pointer;min-height:41px}.btn-primary{background:var(--primary);color:#fff}.btn-reset{background:#edf2f7;color:#425466;text-decoration:none;display:inline-flex;align-items:center}.filter-field-hidden{display:none!important}.date-filter-note{grid-column:1/-1;font-size:10.5px;color:#718096;margin-top:-3px}
         .analytics-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.panel{background:#fff;border:1px solid var(--border);border-radius:14px;padding:15px;min-width:0;min-height:320px;display:flex;flex-direction:column;box-shadow:0 5px 15px rgba(31,41,55,.045)}.panel-head{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:12px}.panel h3{margin:0;font-size:16px;color:var(--secondary);font-weight:700}.panel-sub{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.35}.chart-area{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:center;padding-top:2px}.hint{font-size:10.5px;color:#7b8794;margin-top:8px}.empty{color:#8a97a6;font-size:12px;text-align:center;padding:30px 8px}
         .trend-scroll{overflow-x:auto;overflow-y:hidden}.trend-svg{display:block;height:220px}.trend-point{cursor:pointer;outline:none}.trend-point:hover,.trend-point:focus{stroke-width:5}.bar-list{display:flex;flex-direction:column;gap:10px;overflow:visible;padding-right:2px}.bar-button{background:transparent;border:0;padding:0;text-align:left;cursor:pointer;color:inherit}.bar-top{display:flex;justify-content:space-between;gap:8px;font-size:11px;margin-bottom:4px}.bar-name{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bar-value{color:#475569;font-weight:700;white-space:nowrap}.bar-track{height:9px;background:#edf2f7;border-radius:999px;overflow:hidden;display:flex}.bar-fill{height:100%;background:var(--danger);transition:filter .2s}.bar-fill-clear{height:100%;background:var(--success);transition:filter .2s}.bar-button:hover .bar-fill,.bar-button:focus .bar-fill,.bar-button:hover .bar-fill-clear,.bar-button:focus .bar-fill-clear{filter:brightness(.9)}.bar-button.map-linked .bar-track{box-shadow:0 0 0 2px rgba(142,68,173,.18)}.bar-button.map-linked .bar-name,.bar-button.map-linked .bar-value{color:#71368d}.bar-note{font-size:10px;color:#8491a0;margin-top:4px;display:flex;gap:11px;flex-wrap:wrap}.bar-note-item{display:inline-flex;align-items:center;gap:4px}.bar-note-dot{width:7px;height:7px;border-radius:50%;display:inline-block}.mini-legend{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:9.5px;color:#718096}.mini-legend span{display:inline-flex;align-items:center;gap:4px}.priority-summary{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:10px}.priority-stat{border:1px solid #edf1f5;background:#f8fafc;border-radius:10px;padding:9px 11px}.priority-stat b{display:block;font-size:17px;color:#273548;line-height:1.1}.priority-stat span{display:block;font-size:9.5px;color:#7b8794;margin-top:4px}.priority-list{display:flex;flex-direction:column;gap:6px;min-height:0;overflow:auto}.priority-row{width:100%;border:1px solid #edf1f5;background:#fff;border-radius:9px;padding:7px 9px;display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:10px;align-items:center;text-align:left;cursor:pointer;color:inherit}.priority-row:hover{background:#fff7f6;border-color:#f2d2ce}.priority-main{min-width:0}.priority-name{display:block;font-size:11.5px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#263241}.priority-meta{display:block;font-size:9.5px;color:#8491a0;margin-top:2px}.priority-age{font-size:10px;font-weight:800;color:#b45b00;background:#fff4df;border-radius:999px;padding:4px 7px;white-space:nowrap}.priority-amount{font-size:10.5px;font-weight:800;color:#b9382b;white-space:nowrap}.priority-footer{display:flex;justify-content:flex-end;margin-top:9px}.priority-all{border:0;background:#eef6ff;color:#21618c;border-radius:8px;padding:7px 10px;font-size:10.5px;font-weight:800;cursor:pointer}.priority-all:hover{background:#dfeffc}
         .ranking{display:flex;flex-direction:column;gap:9px;overflow:auto}.rank-btn{border:1px solid #edf1f5;background:#fbfdff;border-radius:11px;padding:10px 12px;display:grid;grid-template-columns:28px minmax(0,1fr) auto;gap:12px;align-items:center;cursor:pointer;text-align:left}.rank-btn:hover{background:#f2f8fd;border-color:#d8e8f6}.rank-no{width:25px;height:25px;border-radius:50%;display:grid;place-items:center;background:#edf2f7;font-size:11px;font-weight:800}.rank-main{display:flex;flex-direction:column;gap:4px;min-width:0}.rank-name{font-size:12.5px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;line-height:1.15}.rank-meta{font-size:10px;color:#7d8b99;display:block;line-height:1.1;letter-spacing:.2px}.rank-streak{font-size:11px;color:#1f7a4d;font-weight:800;white-space:nowrap;padding-left:10px}
@@ -517,25 +519,44 @@ $maxOutstanding = max(1, ...array_map(fn($r)=>(float)$r['value'], $outstanding ?
         <form method="get" id="analyticsFilter">
             <div class="filter-grid">
                 <div class="field">
-                    <label>Dari Periode</label>
-                    <div class="period-pair">
+                    <label>Jenis Filter</label>
+                    <select name="filter_tipe" id="filterTipe">
+                        <option value="bulan" <?= $range['filter_tipe']==='bulan'?'selected':'' ?>>Rentang Bulan</option>
+                        <option value="tanggal" <?= $range['filter_tipe']==='tanggal'?'selected':'' ?>>Rentang Tanggal</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <div data-filter-bulan class="<?= $range['filter_tipe']==='bulan'?'':'filter-field-hidden' ?>">
+                        <label>Dari Periode</label>
+                        <div class="period-pair">
                         <select name="bulan_awal">
                             <?php foreach($bulanOptions as $v=>$n): ?><option value="<?= $v ?>" <?= $range['bulan_awal']===$v?'selected':'' ?>><?= htmlspecialchars($n) ?></option><?php endforeach; ?>
                         </select>
                         <select name="tahun_awal">
                             <?php foreach($yearOptions as $y): ?><option value="<?= $y ?>" <?= $range['tahun_awal']===$y?'selected':'' ?>><?= $y ?></option><?php endforeach; ?>
                         </select>
+                        </div>
+                    </div>
+                    <div data-filter-tanggal class="<?= $range['filter_tipe']==='tanggal'?'':'filter-field-hidden' ?>">
+                        <label>Dari Tanggal</label>
+                        <input type="date" name="tanggal_awal" value="<?= htmlspecialchars($range['tanggal_awal']) ?>">
                     </div>
                 </div>
                 <div class="field">
-                    <label>Sampai Periode</label>
-                    <div class="period-pair">
+                    <div data-filter-bulan class="<?= $range['filter_tipe']==='bulan'?'':'filter-field-hidden' ?>">
+                        <label>Sampai Periode</label>
+                        <div class="period-pair">
                         <select name="bulan_akhir">
                             <?php foreach($bulanOptions as $v=>$n): ?><option value="<?= $v ?>" <?= $range['bulan_akhir']===$v?'selected':'' ?>><?= htmlspecialchars($n) ?></option><?php endforeach; ?>
                         </select>
                         <select name="tahun_akhir">
                             <?php foreach($yearOptions as $y): ?><option value="<?= $y ?>" <?= $range['tahun_akhir']===$y?'selected':'' ?>><?= $y ?></option><?php endforeach; ?>
                         </select>
+                        </div>
+                    </div>
+                    <div data-filter-tanggal class="<?= $range['filter_tipe']==='tanggal'?'':'filter-field-hidden' ?>">
+                        <label>Sampai Tanggal</label>
+                        <input type="date" name="tanggal_akhir" value="<?= htmlspecialchars($range['tanggal_akhir']) ?>">
                     </div>
                 </div>
                 <div class="field">
@@ -554,6 +575,7 @@ $maxOutstanding = max(1, ...array_map(fn($r)=>(float)$r['value'], $outstanding ?
                     <a class="btn btn-reset" href="analitik_salam.php"><i class="fas fa-rotate-left" style="margin-right:6px"></i> Reset</a>
                     <button class="btn btn-export-all" type="button" data-export-all title="Unduh semua hasil analitik beserta rinciannya dalam satu file Excel"><i class="fas fa-file-excel"></i> Export Semua Analitik</button>
                 </div>
+                <div class="date-filter-note <?= $range['filter_tipe']==='tanggal'?'':'filter-field-hidden' ?>" data-filter-tanggal-note>Rentang tanggal mencakup seluruh tagihan pada bulan yang tersentuh agar data lunas dan belum lunas tetap lengkap.</div>
             </div>
         </form>
     </div>
@@ -911,7 +933,23 @@ $maxOutstanding = max(1, ...array_map(fn($r)=>(float)$r['value'], $outstanding ?
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 <script>
 (() => {
+    const selector = document.getElementById('filterTipe');
+    if (!selector) return;
+    const syncFilterFields = () => {
+        const isTanggal = selector.value === 'tanggal';
+        document.querySelectorAll('[data-filter-bulan]').forEach(el => el.classList.toggle('filter-field-hidden', isTanggal));
+        document.querySelectorAll('[data-filter-tanggal],[data-filter-tanggal-note]').forEach(el => el.classList.toggle('filter-field-hidden', !isTanggal));
+    };
+    selector.addEventListener('change', syncFilterFields);
+    syncFilterFields();
+})();
+</script>
+<script>
+(() => {
     const rootParams = new URLSearchParams({
+        filter_tipe: <?= json_encode($range['filter_tipe']) ?>,
+        tanggal_awal: <?= json_encode($range['tanggal_awal']) ?>,
+        tanggal_akhir: <?= json_encode($range['tanggal_akhir']) ?>,
         bulan_awal: <?= json_encode($range['bulan_awal']) ?>,
         tahun_awal: <?= json_encode((string)$range['tahun_awal']) ?>,
         bulan_akhir: <?= json_encode($range['bulan_akhir']) ?>,
@@ -1014,6 +1052,9 @@ $maxOutstanding = max(1, ...array_map(fn($r)=>(float)$r['value'], $outstanding ?
     }
 
     const params = new URLSearchParams({
+        filter_tipe: <?= json_encode($range['filter_tipe']) ?>,
+        tanggal_awal: <?= json_encode($range['tanggal_awal']) ?>,
+        tanggal_akhir: <?= json_encode($range['tanggal_akhir']) ?>,
         bulan_awal: <?= json_encode($range['bulan_awal']) ?>,
         tahun_awal: <?= json_encode((string)$range['tahun_awal']) ?>,
         bulan_akhir: <?= json_encode($range['bulan_akhir']) ?>,
