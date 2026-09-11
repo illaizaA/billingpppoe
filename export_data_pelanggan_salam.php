@@ -406,6 +406,9 @@ function arsipKirimFile(string $path, string $contentType, string $filename): vo
 $format = strtolower(trim((string) ($_GET['format'] ?? 'excel')));
 if (!in_array($format, ['excel', 'pdf'], true)) $format = 'excel';
 
+$filterMode = trim((string) ($_GET['filter_mode'] ?? 'periode'));
+if (!in_array($filterMode, ['periode', 'tanggal_bayar'], true)) $filterMode = 'periode';
+
 $currentPeriod = date('Y-m');
 $bulanAwal = trim((string) ($_GET['bulan_awal'] ?? substr($currentPeriod, 5, 2)));
 $tahunAwal = trim((string) ($_GET['tahun_awal'] ?? substr($currentPeriod, 0, 4)));
@@ -417,8 +420,20 @@ $periodeAkhir = preg_match('/^(0?[1-9]|1[0-2])$/', $bulanAkhir) && preg_match('/
     ? sprintf('%04d-%02d', (int) $tahunAkhir, (int) $bulanAkhir) : $currentPeriod;
 if ($periodeAwal > $periodeAkhir) [$periodeAwal, $periodeAkhir] = [$periodeAkhir, $periodeAwal];
 
+$today = date('Y-m-d');
+$rawTanggalAwal = trim((string) ($_GET['tanggal_awal'] ?? $today));
+$rawTanggalAkhir = trim((string) ($_GET['tanggal_akhir'] ?? $today));
+$validDate = static function (string $value): bool {
+    $date = DateTime::createFromFormat('Y-m-d', $value);
+    return $date instanceof DateTime && $date->format('Y-m-d') === $value;
+};
+$tanggalAwal = $validDate($rawTanggalAwal) ? $rawTanggalAwal : $today;
+$tanggalAkhir = $validDate($rawTanggalAkhir) ? $rawTanggalAkhir : $today;
+if ($tanggalAwal > $tanggalAkhir) [$tanggalAwal, $tanggalAkhir] = [$tanggalAkhir, $tanggalAwal];
+
 $statusPelanggan = (string) ($_GET['status_pelanggan'] ?? 'all');
 $statusBayar = (string) ($_GET['status_bayar'] ?? 'all');
+if ($filterMode === 'tanggal_bayar') $statusBayar = 'Lunas';
 $alamat = trim((string) ($_GET['alamat'] ?? 'all'));
 $search = trim((string) ($_GET['search'] ?? ''));
 $conditions = ['1=1'];
@@ -472,21 +487,29 @@ if ($ids) {
     $placeholders = implode(',', array_fill(0, count($ids), '?'));
     $statusBayarSql = in_array($statusBayar, ['Lunas', 'Belum Lunas'], true)
         ? ' AND x.status_bayar = ?' : '';
+    $currentRangeSql = $filterMode === 'tanggal_bayar'
+        ? 'p.tanggal_bayar BETWEEN ? AND ?'
+        : "DATE_FORMAT(p.waktu,'%Y-%m') BETWEEN ? AND ?";
+    $historyRangeSql = $filterMode === 'tanggal_bayar'
+        ? 't.tanggal_bayar BETWEEN ? AND ?'
+        : "DATE_FORMAT(t.periode,'%Y-%m') BETWEEN ? AND ?";
     $sql = "SELECT * FROM (
         SELECT p.id pelanggan_id, p.id_pelanggan, p.nama, p.alamat, p.waktu periode,
             p.tagihan nominal_tagihan, p.status_bayar, p.langganan_selesai tanggal_jatuh_tempo,
             p.tanggal_bayar, p.nominal_dibayar, p.nomor_invoice
         FROM pelanggan_salam p
-        WHERE DATE_FORMAT(p.waktu,'%Y-%m') BETWEEN ? AND ?
+        WHERE {$currentRangeSql}
         UNION ALL
         SELECT t.pelanggan_id, t.id_pelanggan_snapshot, t.nama_snapshot, t.alamat_snapshot,
             t.periode, t.nominal_tagihan, t.status_bayar, t.tanggal_jatuh_tempo,
             t.tanggal_bayar, t.nominal_dibayar, t.nomor_invoice
         FROM tagihan_salam t
-        WHERE DATE_FORMAT(t.periode,'%Y-%m') BETWEEN ? AND ?
+        WHERE {$historyRangeSql}
           AND NOT EXISTS (SELECT 1 FROM pelanggan_salam p2 WHERE p2.id=t.pelanggan_id AND DATE_FORMAT(p2.waktu,'%Y-%m')=DATE_FORMAT(t.periode,'%Y-%m'))
     ) x WHERE x.pelanggan_id IN ($placeholders)$statusBayarSql ORDER BY x.periode, x.alamat, x.nama, x.pelanggan_id";
-    $historyParams = [$periodeAwal, $periodeAkhir, $periodeAwal, $periodeAkhir, ...$ids];
+    $historyParams = $filterMode === 'tanggal_bayar'
+        ? [$tanggalAwal, $tanggalAkhir, $tanggalAwal, $tanggalAkhir, ...$ids]
+        : [$periodeAwal, $periodeAkhir, $periodeAwal, $periodeAkhir, ...$ids];
     $historyTypes = 'ssss' . str_repeat('i', count($ids));
     if ($statusBayarSql !== '') {
         $historyParams[] = $statusBayar;
@@ -499,6 +522,18 @@ if ($ids) {
     $historyResult = $historyStmt->get_result();
     while ($row = $historyResult->fetch_assoc()) $transaksi[] = $row;
     $historyStmt->close();
+}
+
+if ($filterMode === 'tanggal_bayar') {
+    // Pada mode tanggal bayar, sheet Data Pelanggan hanya memuat pelanggan
+    // yang memang memiliki transaksi dalam rentang tanggal tersebut.
+    $paidCustomerIds = [];
+    foreach ($transaksi as $transactionRow) {
+        $paidCustomerIds[(int) ($transactionRow['pelanggan_id'] ?? 0)] = true;
+    }
+    $pelanggan = array_values(array_filter($pelanggan, static function (array $row) use ($paidCustomerIds): bool {
+        return isset($paidCustomerIds[(int) ($row['id'] ?? 0)]);
+    }));
 }
 
 $stamp = date('Ymd_His');
@@ -530,7 +565,7 @@ header('Content-Type: text/html; charset=utf-8');
 <body>
 <div class="toolbar"><button onclick="window.print()">Cetak / Simpan PDF</button></div>
 <div class="title">Arsip Data Pelanggan Lengkap</div>
-<div class="subtitle">Data pelanggan sesuai filter • Riwayat transaksi <?= arsipHtml($periodeAwal) ?> sampai <?= arsipHtml($periodeAkhir) ?> • Dibuat <?= arsipHtml(date('d-m-Y H:i:s')) ?> WIB</div>
+<div class="subtitle">Data pelanggan sesuai filter • <?= $filterMode === 'tanggal_bayar' ? 'Tanggal bayar ' . arsipHtml($tanggalAwal) . ' sampai ' . arsipHtml($tanggalAkhir) : 'Riwayat transaksi ' . arsipHtml($periodeAwal) . ' sampai ' . arsipHtml($periodeAkhir) ?> • Dibuat <?= arsipHtml(date('d-m-Y H:i:s')) ?> WIB</div>
 <div class="privacy">Dokumen ini memuat NIK, nomor WhatsApp, dan koordinat. Simpan hanya pada perangkat yang aman.</div>
 <?php if (!$pelanggan): ?><div class="customer empty">Tidak ada data pelanggan sesuai filter.</div><?php endif; ?>
 <?php foreach ($pelanggan as $p): ?>

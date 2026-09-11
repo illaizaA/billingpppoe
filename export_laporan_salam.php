@@ -16,6 +16,10 @@ function salamBindParams(mysqli_stmt $stmt, string $types, array &$params): void
 }
 
 $format = $_GET['format'] ?? 'excel';
+$filterMode = trim((string) ($_GET['filter_mode'] ?? 'periode'));
+if (!in_array($filterMode, ['periode', 'tanggal_bayar'], true)) {
+    $filterMode = 'periode';
+}
 $periode = trim($_GET['periode'] ?? date('Y-m'));
 if (!preg_match('/^\d{4}-\d{2}$/', $periode)) {
     $periode = date('Y-m');
@@ -37,7 +41,23 @@ if (strcmp($periodeAwal, $periodeAkhir) > 0) {
     [$periodeAwal, $periodeAkhir] = [$periodeAkhir, $periodeAwal];
 }
 
+$today = date('Y-m-d');
+$rawTanggalAwal = trim((string) ($_GET['tanggal_awal'] ?? $today));
+$rawTanggalAkhir = trim((string) ($_GET['tanggal_akhir'] ?? $today));
+$validDate = static function (string $value): bool {
+    $date = DateTime::createFromFormat('Y-m-d', $value);
+    return $date instanceof DateTime && $date->format('Y-m-d') === $value;
+};
+$tanggalAwal = $validDate($rawTanggalAwal) ? $rawTanggalAwal : $today;
+$tanggalAkhir = $validDate($rawTanggalAkhir) ? $rawTanggalAkhir : $today;
+if ($tanggalAwal > $tanggalAkhir) {
+    [$tanggalAwal, $tanggalAkhir] = [$tanggalAkhir, $tanggalAwal];
+}
+
 $statusBayar = $_GET['status_bayar'] ?? 'all';
+if ($filterMode === 'tanggal_bayar') {
+    $statusBayar = 'Lunas';
+}
 $statusPelanggan = $_GET['status_pelanggan'] ?? 'all';
 $alamatFilter = trim($_GET['alamat'] ?? 'all');
 $search = trim($_GET['search'] ?? '');
@@ -124,6 +144,13 @@ function salamRowMatchesSearch(array $row, string $search): bool {
     return false;
 }
 
+$currentRangeSql = $filterMode === 'tanggal_bayar'
+    ? 'p.tanggal_bayar BETWEEN ? AND ?'
+    : "DATE_FORMAT(p.waktu, '%Y-%m') BETWEEN ? AND ?";
+$historyRangeSql = $filterMode === 'tanggal_bayar'
+    ? 't.tanggal_bayar BETWEEN ? AND ?'
+    : "DATE_FORMAT(t.periode, '%Y-%m') BETWEEN ? AND ?";
+
 $baseLaporanSql = "
     SELECT
         p.id AS id,
@@ -146,7 +173,7 @@ $baseLaporanSql = "
         p.nomor_invoice,
         'berjalan' AS sumber_data
     FROM pelanggan_salam p
-    WHERE DATE_FORMAT(p.waktu, '%Y-%m') BETWEEN ? AND ?
+    WHERE {$currentRangeSql}
 
     UNION ALL
 
@@ -172,7 +199,7 @@ $baseLaporanSql = "
         'riwayat' AS sumber_data
     FROM tagihan_salam t
     LEFT JOIN pelanggan_salam p ON p.id = t.pelanggan_id
-    WHERE DATE_FORMAT(t.periode, '%Y-%m') BETWEEN ? AND ?
+    WHERE {$historyRangeSql}
       AND NOT EXISTS (
           SELECT 1
           FROM pelanggan_salam p_berjalan
@@ -183,7 +210,9 @@ $baseLaporanSql = "
 
 $conditions = ['1 = 1'];
 $types = 'ssss';
-$params = [$periodeAwal, $periodeAkhir, $periodeAwal, $periodeAkhir];
+$params = $filterMode === 'tanggal_bayar'
+    ? [$tanggalAwal, $tanggalAkhir, $tanggalAwal, $tanggalAkhir]
+    : [$periodeAwal, $periodeAkhir, $periodeAwal, $periodeAkhir];
 
 if (in_array($statusBayar, ['Lunas', 'Belum Lunas'], true)) {
     $conditions[] = 'status_bayar = ?';
@@ -231,7 +260,15 @@ if ($search !== '') {
     }));
 }
 
-if ($periodeAwal === $periodeAkhir) {
+if ($filterMode === 'tanggal_bayar') {
+    $tanggalAwalLabel = salamBulananIndonesia($tanggalAwal, true);
+    $tanggalAkhirLabel = salamBulananIndonesia($tanggalAkhir, true);
+    $periodeLabel = $tanggalAwal === $tanggalAkhir
+        ? $tanggalAwalLabel
+        : $tanggalAwalLabel . ' - ' . $tanggalAkhirLabel;
+    $filenameBase = 'laporan_billing_semua_wilayah_tanggal_'
+        . str_replace('-', '_', $tanggalAwal) . '_sd_' . str_replace('-', '_', $tanggalAkhir);
+} elseif ($periodeAwal === $periodeAkhir) {
     $periodeLabel = salamBulananIndonesia($periodeAwal . '-01', false);
     $filenameBase = 'laporan_billing_semua_wilayah_' . str_replace('-', '_', $periodeAwal);
 } else {
@@ -275,7 +312,8 @@ function salamExportXlsx(
     string $periodeLabel,
     string $statusBayar,
     string $statusPelanggan,
-    string $alamatFilter
+    string $alamatFilter,
+    string $filterMode = 'periode'
 ): void {
     if (!class_exists('ZipArchive')) {
         http_response_code(500);
@@ -309,7 +347,7 @@ function salamExportXlsx(
         . '</row>';
 
     $sheetRows[] = '<row r="4">'
-        . salamExcelTextCell('A4', 'Periode', 3)
+        . salamExcelTextCell('A4', $filterMode === 'tanggal_bayar' ? 'Tanggal Bayar' : 'Periode', 3)
         . salamExcelTextCell('B4', $periodeLabel, 4)
         . salamExcelTextCell('C4', 'Status Bayar', 3)
         . salamExcelTextCell('D4', $statusBayar === 'all' ? 'Semua' : $statusBayar, 4)
@@ -542,7 +580,8 @@ if ($format === 'excel') {
         $periodeLabel,
         $statusBayar,
         $statusPelanggan,
-        $alamatFilter
+        $alamatFilter,
+        $filterMode
     );
 }
 
@@ -783,7 +822,7 @@ header('Content-Type: text/html; charset=utf-8');
 
     <table class="meta-table">
         <tr>
-            <td class="meta-label">Periode</td>
+            <td class="meta-label"><?= $filterMode === 'tanggal_bayar' ? 'Tanggal Bayar' : 'Periode'; ?></td>
             <td><?= h($periodeLabel); ?></td>
             <td class="meta-label">Status Bayar</td>
             <td><?= h($statusBayar === 'all' ? 'Semua' : $statusBayar); ?></td>

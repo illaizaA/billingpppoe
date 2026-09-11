@@ -30,6 +30,11 @@ $bulanOptions = [
     '12' => 'Desember',
 ];
 
+$filterMode = trim((string) ($_GET['filter_mode'] ?? 'periode'));
+if (!in_array($filterMode, ['periode', 'tanggal_bayar'], true)) {
+    $filterMode = 'periode';
+}
+
 $periode = trim($_GET['periode'] ?? date('Y-m'));
 if (!preg_match('/^\d{4}-\d{2}$/', $periode)) {
     $periode = date('Y-m');
@@ -55,7 +60,25 @@ $selectedTahunAwal = (int) substr($periodeAwal, 0, 4);
 $selectedBulanAwal = substr($periodeAwal, 5, 2);
 $selectedTahunAkhir = (int) substr($periodeAkhir, 0, 4);
 $selectedBulanAkhir = substr($periodeAkhir, 5, 2);
+
+$today = date('Y-m-d');
+$rawTanggalAwal = trim((string) ($_GET['tanggal_awal'] ?? $today));
+$rawTanggalAkhir = trim((string) ($_GET['tanggal_akhir'] ?? $today));
+$validDate = static function (string $value): bool {
+    $date = DateTime::createFromFormat('Y-m-d', $value);
+    return $date instanceof DateTime && $date->format('Y-m-d') === $value;
+};
+$tanggalAwal = $validDate($rawTanggalAwal) ? $rawTanggalAwal : $today;
+$tanggalAkhir = $validDate($rawTanggalAkhir) ? $rawTanggalAkhir : $today;
+if ($tanggalAwal > $tanggalAkhir) {
+    [$tanggalAwal, $tanggalAkhir] = [$tanggalAkhir, $tanggalAwal];
+}
+
 $statusBayar = $_GET['status_bayar'] ?? 'all';
+if ($filterMode === 'tanggal_bayar') {
+    // Mode tanggal bayar memang hanya menampilkan transaksi yang sudah dibayar.
+    $statusBayar = 'Lunas';
+}
 $statusPelanggan = $_GET['status_pelanggan'] ?? 'all';
 $alamatFilter = trim($_GET['alamat'] ?? 'all');
 $search = trim($_GET['search'] ?? '');
@@ -166,6 +189,13 @@ function salamRowMatchesSearch(array $row, string $search): bool {
     return false;
 }
 
+$currentRangeSql = $filterMode === 'tanggal_bayar'
+    ? 'p.tanggal_bayar BETWEEN ? AND ?'
+    : "DATE_FORMAT(p.waktu, '%Y-%m') BETWEEN ? AND ?";
+$historyRangeSql = $filterMode === 'tanggal_bayar'
+    ? 't.tanggal_bayar BETWEEN ? AND ?'
+    : "DATE_FORMAT(t.periode, '%Y-%m') BETWEEN ? AND ?";
+
 $baseLaporanSql = "
     SELECT
         p.id AS id,
@@ -188,7 +218,7 @@ $baseLaporanSql = "
         p.nomor_invoice,
         'berjalan' AS sumber_data
     FROM pelanggan_salam p
-    WHERE DATE_FORMAT(p.waktu, '%Y-%m') BETWEEN ? AND ?
+    WHERE {$currentRangeSql}
 
     UNION ALL
 
@@ -214,7 +244,7 @@ $baseLaporanSql = "
         'riwayat' AS sumber_data
     FROM tagihan_salam t
     LEFT JOIN pelanggan_salam p ON p.id = t.pelanggan_id
-    WHERE DATE_FORMAT(t.periode, '%Y-%m') BETWEEN ? AND ?
+    WHERE {$historyRangeSql}
       AND NOT EXISTS (
           SELECT 1
           FROM pelanggan_salam p_berjalan
@@ -225,7 +255,9 @@ $baseLaporanSql = "
 
 $conditions = ['1 = 1'];
 $types = 'ssss';
-$params = [$periodeAwal, $periodeAkhir, $periodeAwal, $periodeAkhir];
+$params = $filterMode === 'tanggal_bayar'
+    ? [$tanggalAwal, $tanggalAkhir, $tanggalAwal, $tanggalAkhir]
+    : [$periodeAwal, $periodeAkhir, $periodeAwal, $periodeAkhir];
 
 if (in_array($statusBayar, ['Lunas', 'Belum Lunas'], true)) {
     $conditions[] = 'status_bayar = ?';
@@ -293,7 +325,13 @@ foreach ($rows as $row) {
 }
 
 
-if ($periodeAwal === $periodeAkhir) {
+if ($filterMode === 'tanggal_bayar') {
+    $tanggalAwalLabel = salamBulananIndonesia($tanggalAwal, true);
+    $tanggalAkhirLabel = salamBulananIndonesia($tanggalAkhir, true);
+    $periodeLabel = $tanggalAwal === $tanggalAkhir
+        ? 'Tanggal Bayar ' . $tanggalAwalLabel
+        : 'Tanggal Bayar ' . $tanggalAwalLabel . ' - ' . $tanggalAkhirLabel;
+} elseif ($periodeAwal === $periodeAkhir) {
     $periodeLabel = salamBulananIndonesia($periodeAwal . '-01', false);
 } else {
     $periodeLabel = salamBulananIndonesia($periodeAwal . '-01', false)
@@ -333,10 +371,13 @@ if ($perPage === 'all') {
 }
 
 $filterParams = [
+    'filter_mode' => $filterMode,
     'bulan_awal' => $selectedBulanAwal,
     'tahun_awal' => $selectedTahunAwal,
     'bulan_akhir' => $selectedBulanAkhir,
     'tahun_akhir' => $selectedTahunAkhir,
+    'tanggal_awal' => $tanggalAwal,
+    'tanggal_akhir' => $tanggalAkhir,
     'status_bayar' => $statusBayar,
     'status_pelanggan' => $statusPelanggan,
     'alamat' => $alamatFilter,
@@ -348,10 +389,13 @@ $pageUrl = function (int $page) use ($filterParams): string {
 };
 
 $exportQuery = http_build_query([
+    'filter_mode' => $filterMode,
     'bulan_awal' => $selectedBulanAwal,
     'tahun_awal' => $selectedTahunAwal,
     'bulan_akhir' => $selectedBulanAkhir,
     'tahun_akhir' => $selectedTahunAkhir,
+    'tanggal_awal' => $tanggalAwal,
+    'tanggal_akhir' => $tanggalAkhir,
     'status_bayar' => $statusBayar,
     'status_pelanggan' => $statusPelanggan,
     'alamat' => $alamatFilter,
@@ -470,6 +514,7 @@ $exportQuery = http_build_query([
             grid-template-columns: 1.2fr .8fr;
             gap: 8px;
         }
+        .filter-field-hidden { display: none !important; }
         label {
             display: block;
             margin-bottom: 6px;
@@ -1011,6 +1056,13 @@ $exportQuery = http_build_query([
                 <input type="hidden" name="page" value="1">
                 <div class="filter-grid">
                     <div>
+                        <label for="filter_mode">Filter Berdasarkan</label>
+                        <select id="filter_mode" name="filter_mode">
+                            <option value="periode" <?= $filterMode === 'periode' ? 'selected' : ''; ?>>Periode Bulan</option>
+                            <option value="tanggal_bayar" <?= $filterMode === 'tanggal_bayar' ? 'selected' : ''; ?>>Tanggal Bayar</option>
+                        </select>
+                    </div>
+                    <div data-filter-group="periode" class="<?= $filterMode === 'periode' ? '' : 'filter-field-hidden'; ?>">
                         <label>Dari Periode</label>
                         <div class="period-selects">
                             <select id="bulan_awal" name="bulan_awal" aria-label="Pilih bulan awal">
@@ -1025,7 +1077,7 @@ $exportQuery = http_build_query([
                             </select>
                         </div>
                     </div>
-                    <div>
+                    <div data-filter-group="periode" class="<?= $filterMode === 'periode' ? '' : 'filter-field-hidden'; ?>">
                         <label>Sampai Periode</label>
                         <div class="period-selects">
                             <select id="bulan_akhir" name="bulan_akhir" aria-label="Pilih bulan akhir">
@@ -1039,6 +1091,14 @@ $exportQuery = http_build_query([
                                 <?php endforeach; ?>
                             </select>
                         </div>
+                    </div>
+                    <div data-filter-group="tanggal_bayar" class="<?= $filterMode === 'tanggal_bayar' ? '' : 'filter-field-hidden'; ?>">
+                        <label for="tanggal_awal">Dari Tanggal Bayar</label>
+                        <input type="date" id="tanggal_awal" name="tanggal_awal" value="<?= htmlspecialchars($tanggalAwal); ?>">
+                    </div>
+                    <div data-filter-group="tanggal_bayar" class="<?= $filterMode === 'tanggal_bayar' ? '' : 'filter-field-hidden'; ?>">
+                        <label for="tanggal_akhir">Sampai Tanggal Bayar</label>
+                        <input type="date" id="tanggal_akhir" name="tanggal_akhir" value="<?= htmlspecialchars($tanggalAkhir); ?>">
                     </div>
                     <div>
                         <label for="status_bayar">Status Bayar</label>
@@ -1092,10 +1152,13 @@ $exportQuery = http_build_query([
                 </div>
                 <div class="table-actions">
                     <form method="get" class="rows-control">
+                        <input type="hidden" name="filter_mode" value="<?= htmlspecialchars($filterMode); ?>">
                         <input type="hidden" name="bulan_awal" value="<?= htmlspecialchars($selectedBulanAwal); ?>">
                         <input type="hidden" name="tahun_awal" value="<?= htmlspecialchars((string) $selectedTahunAwal); ?>">
                         <input type="hidden" name="bulan_akhir" value="<?= htmlspecialchars($selectedBulanAkhir); ?>">
                         <input type="hidden" name="tahun_akhir" value="<?= htmlspecialchars((string) $selectedTahunAkhir); ?>">
+                        <input type="hidden" name="tanggal_awal" value="<?= htmlspecialchars($tanggalAwal); ?>">
+                        <input type="hidden" name="tanggal_akhir" value="<?= htmlspecialchars($tanggalAkhir); ?>">
                         <input type="hidden" name="status_bayar" value="<?= htmlspecialchars($statusBayar); ?>">
                         <input type="hidden" name="status_pelanggan" value="<?= htmlspecialchars($statusPelanggan); ?>">
                         <input type="hidden" name="alamat" value="<?= htmlspecialchars($alamatFilter); ?>">
@@ -1250,6 +1313,37 @@ $exportQuery = http_build_query([
     </div>
 
     <script>
+        (function () {
+            const mode = document.getElementById('filter_mode');
+            const statusBayar = document.getElementById('status_bayar');
+            const periodFields = document.querySelectorAll('[data-filter-group="periode"]');
+            const dateFields = document.querySelectorAll('[data-filter-group="tanggal_bayar"]');
+
+            function updateFilterMode() {
+                const byDate = mode && mode.value === 'tanggal_bayar';
+                periodFields.forEach(function (element) {
+                    element.classList.toggle('filter-field-hidden', byDate);
+                });
+                dateFields.forEach(function (element) {
+                    element.classList.toggle('filter-field-hidden', !byDate);
+                });
+
+                // Tanggal bayar hanya dimiliki transaksi yang sudah lunas.
+                if (statusBayar) {
+                    if (byDate) {
+                        statusBayar.value = 'Lunas';
+                        statusBayar.disabled = true;
+                    } else {
+                        statusBayar.disabled = false;
+                    }
+                }
+            }
+
+            if (mode) {
+                mode.addEventListener('change', updateFilterMode);
+                updateFilterMode();
+            }
+        })();
     </script>
 
 </body>
