@@ -6,18 +6,39 @@ require_once __DIR__ . '/helpers_salam.php';
 require_once __DIR__ . '/pelanggan_detail_helper.php';
 
 header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 salamRequireLogin();
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+$requestMethod = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? ''));
+$refererPath = (string) parse_url((string) ($_SERVER['HTTP_REFERER'] ?? ''), PHP_URL_PATH);
+$fetchSite = strtolower((string) ($_SERVER['HTTP_SEC_FETCH_SITE'] ?? ''));
+$legacyDashboardRequest = $requestMethod === 'GET'
+    && isset($_GET['id'])
+    && basename($refererPath) === 'dashboard_salam.php'
+    && in_array($fetchSite, ['same-origin', 'same-site'], true);
+
+// POST adalah alur final. GET lama hanya diterima dari fetch dashboard yang
+// masih tersimpan di cache browser agar data telanjur salah tetap dapat dihapus.
+if ($requestMethod !== 'POST' && !$legacyDashboardRequest) {
     http_response_code(405);
     echo json_encode([
         'success' => false,
-        'message' => 'Penghapusan hanya dapat dilakukan melalui konfirmasi aplikasi.'
+        'message' => 'Penghapusan hanya dapat dilakukan melalui konfirmasi aplikasi.',
+        'request_method' => $requestMethod,
     ]);
     exit;
 }
 
-$id = (int) ($_POST['id'] ?? 0);
+if ($requestMethod === 'POST' && (string) ($_POST['confirmed'] ?? '') !== '1') {
+    http_response_code(400);
+    echo json_encode([
+        'success' => false,
+        'message' => 'Konfirmasi penghapusan tidak valid.'
+    ]);
+    exit;
+}
+
+$id = (int) ($requestMethod === 'POST' ? ($_POST['id'] ?? 0) : ($_GET['id'] ?? 0));
 
 if ($id <= 0) {
     echo json_encode([
@@ -54,6 +75,8 @@ $deleteScope = salamScopeCondition($koneksi, 'alamat');
 $ok = false;
 $affected = 0;
 $deletedBills = 0;
+$deletedDetail = 0;
+$deletedMapping = 0;
 
 try {
     $koneksi->begin_transaction();
@@ -70,7 +93,8 @@ try {
     }
     $checkStmt->bind_param('i', $id);
     $checkStmt->execute();
-    $allowed = (bool) $checkStmt->get_result()->fetch_assoc();
+    $customerRow = $checkStmt->get_result()->fetch_assoc();
+    $allowed = (bool) $customerRow;
     $checkStmt->close();
 
     if (!$allowed) {
@@ -88,6 +112,35 @@ try {
     }
     $deletedBills = $billStmt->affected_rows;
     $billStmt->close();
+
+    // Bersihkan mapping secara eksplisit agar tetap aman pada database lama
+    // yang belum memiliki ON DELETE CASCADE.
+    $mappingTable = $koneksi->query("SHOW TABLES LIKE 'pelanggan_pppoe_mapping'");
+    if ($mappingTable instanceof mysqli_result && $mappingTable->num_rows > 0) {
+        $mappingStmt = $koneksi->prepare('DELETE FROM pelanggan_pppoe_mapping WHERE pelanggan_id = ?');
+        if (!$mappingStmt) {
+            throw new RuntimeException($koneksi->error);
+        }
+        $mappingStmt->bind_param('i', $id);
+        if (!$mappingStmt->execute()) {
+            throw new RuntimeException($mappingStmt->error);
+        }
+        $deletedMapping = $mappingStmt->affected_rows;
+        $mappingStmt->close();
+    }
+
+    if (salamDetailPelangganTableReady($koneksi)) {
+        $detailStmt = $koneksi->prepare('DELETE FROM pelanggan_detail_salam WHERE pelanggan_id = ?');
+        if (!$detailStmt) {
+            throw new RuntimeException($koneksi->error);
+        }
+        $detailStmt->bind_param('i', $id);
+        if (!$detailStmt->execute()) {
+            throw new RuntimeException($detailStmt->error);
+        }
+        $deletedDetail = $detailStmt->affected_rows;
+        $detailStmt->close();
+    }
 
     // Hapus master. Detail dan mapping mengikuti ON DELETE CASCADE jika terpasang.
     $stmt = $koneksi->prepare(
@@ -126,8 +179,10 @@ $koneksi->close();
 echo json_encode([
     'success' => $ok,
     'message' => $ok
-        ? 'Pelanggan dan seluruh riwayat tagihannya berhasil dihapus permanen.'
+        ? 'Pelanggan, tagihan, detail, dan koneksi PPPoE Billing berhasil dihapus permanen.'
         : ($errorMessage ?? 'Data pelanggan gagal dihapus.'),
-    'deleted_bills' => $ok ? $deletedBills : 0
+    'deleted_bills' => $ok ? $deletedBills : 0,
+    'deleted_detail' => $ok ? $deletedDetail : 0,
+    'deleted_mapping' => $ok ? $deletedMapping : 0,
 ]);
 ?>

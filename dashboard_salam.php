@@ -3,6 +3,8 @@ session_start();
 require_once __DIR__ . '/db_salam.php';
 require_once __DIR__ . '/helpers_salam.php';
 salamRequireLogin();
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
 $isSuperAdminSalam = salamIsSuperAdmin();
 $isAdminSemuaWilayahSalam = salamIsAdminSemuaWilayah();
 $isAdminWilayahSalam = !$isSuperAdminSalam
@@ -428,6 +430,12 @@ $dashboardYearOptions = range($dashboardMaxYear, $dashboardMinYear);
         transform: translateY(0) scale(1); 
         opacity: 1; 
     }
+
+    /* SweetAlert harus selalu tampil di atas modal tambah/import pelanggan. */
+    .swal2-container {
+        z-index: 3000 !important;
+    }
+
     /* Style tambahan untuk form di dalam modal (opsional, tapi disarankan) */
     #add-modal .grid { display: flex; gap: 12px; }
     #add-modal .col { flex: 1; }
@@ -2739,19 +2747,39 @@ $dashboardYearOptions = range($dashboardMaxYear, $dashboardMinYear);
                 reverseButtons: true
             }).then((result) => {
                 if (result.isConfirmed) {
-                    fetch(`delete_salam.php?id=${id}`)
-                        .then(res => res.json())
-                        .then(data => {
-                            if (data.success) {
-                                Swal.fire('Terhapus', data.message, 'success');
-                                // refresh table and stats using current pagination/search/filter
-                                if (typeof loadData === 'function') loadData(currentPage, currentSearch, currentFilter);
-                                if (typeof loadStats === 'function') loadStats();
-                            } else {
-                                Swal.fire('Gagal', data.message || 'Delete gagal', 'error');
+                    fetch('delete_salam.php?v=20260911-final', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        cache: 'no-store',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                            'X-Requested-With': 'XMLHttpRequest'
+                        },
+                        body: new URLSearchParams({
+                            id: String(id),
+                            confirmed: '1'
+                        }).toString()
+                    })
+                        .then(async res => {
+                            const text = await res.text();
+                            let data;
+                            try {
+                                data = JSON.parse(text);
+                            } catch (error) {
+                                throw new Error('Respons hapus dari server tidak valid.');
                             }
-                        }).catch(err => {
-                            Swal.fire('Error', 'Terjadi kesalahan jaringan', 'error');
+                            if (!res.ok || !data.success) {
+                                throw new Error(data.message || 'Data pelanggan gagal dihapus.');
+                            }
+                            return data;
+                        })
+                        .then(data => {
+                            Swal.fire('Terhapus', data.message, 'success');
+                            // refresh table and stats using current pagination/search/filter
+                            if (typeof loadData === 'function') loadData(currentPage, currentSearch, currentFilter);
+                            if (typeof loadStats === 'function') loadStats();
+                        }).catch(error => {
+                            Swal.fire('Gagal', error.message || 'Terjadi kesalahan jaringan.', 'error');
                         });
                 }
             });
@@ -2863,6 +2891,42 @@ $dashboardYearOptions = range($dashboardMaxYear, $dashboardMinYear);
             modal.classList.remove('open');
             // Sembunyikan elemen setelah transisi selesai
             setTimeout(() => modal.style.display = 'none', 320);
+        }
+
+        function closeAddModalImmediately() {
+            const modal = document.getElementById('add-modal');
+            if (!modal) return;
+
+            modal.classList.remove('open');
+            modal.style.display = 'none';
+        }
+
+        function escapeImportMessage(value) {
+            return String(value || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        function showImportFailure(message, details) {
+            const errorDetails = Array.isArray(details) ? details.filter(Boolean) : [];
+            closeAddModalImmediately();
+
+            let html = `<div style="text-align:left;white-space:normal;">${escapeImportMessage(message || 'Tidak dapat memproses file Excel.')}</div>`;
+            if (errorDetails.length > 0) {
+                html += '<ol style="text-align:left;margin:14px 0 0;padding-left:22px;max-height:260px;overflow:auto;">'
+                    + errorDetails.slice(0, 40).map(item => `<li style="margin-bottom:6px;">${escapeImportMessage(item)}</li>`).join('')
+                    + '</ol>';
+            }
+
+            return Swal.fire({
+                icon: 'error',
+                title: 'Import gagal',
+                html: html,
+                confirmButtonText: 'OK'
+            });
         }
 
         // ===== FUNGSI-FUNGSI UNTUK MODAL PESAN (Khusus Salam) =====
@@ -3128,27 +3192,34 @@ $dashboardYearOptions = range($dashboardMaxYear, $dashboardMinYear);
                         const message = data && data.message
                             ? data.message
                             : (text || 'Terjadi kesalahan server saat import.');
-
-                        throw new Error(message);
+                        const importError = new Error(message);
+                        importError.details = data && Array.isArray(data.errors) ? data.errors : [];
+                        throw importError;
                     }
 
                     return data;
                 })
                 .then(data => {
                     if (!data || !data.success) {
-                        throw new Error(
+                        const importError = new Error(
                             data && data.message
                                 ? data.message
                                 : 'Import gagal.'
                         );
+                        importError.details = data && Array.isArray(data.errors) ? data.errors : [];
+                        throw importError;
                     }
 
                     const errors = Array.isArray(data.errors) ? data.errors : [];
+                    const importedCustomers = Number(data.imported || 0);
+                    const importedHistory = Number(data.history_imported || 0);
 
                     let detail =
                         `${data.message || 'Import selesai.'}` +
-                        `\nBerhasil: ${Number(data.imported || 0)}` +
-                        `\nDilewati: ${Number(data.skipped || 0)}`;
+                        `\nPelanggan berhasil: ${importedCustomers}` +
+                        `\nRiwayat berhasil: ${importedHistory}` +
+                        `\nPelanggan dilewati: ${Number(data.skipped || 0)}` +
+                        `\nRiwayat dilewati: ${Number(data.history_skipped || 0)}`;
 
                     if (errors.length > 0) {
                         detail += '\n\nCatatan:\n- ' + errors.slice(0, 10).join('\n- ');
@@ -3159,12 +3230,12 @@ $dashboardYearOptions = range($dashboardMaxYear, $dashboardMinYear);
                     }
 
                     Swal.fire({
-                        icon: Number(data.imported || 0) > 0 ? 'success' : 'warning',
+                        icon: (importedCustomers > 0 || importedHistory > 0) ? 'success' : 'warning',
                         title: 'Import Excel Selesai',
                         text: detail
                     });
 
-                    if (Number(data.imported || 0) > 0) {
+                    if (importedCustomers > 0 || importedHistory > 0) {
                         this.reset();
                         closeAddModal();
                         currentPage = 1;
@@ -3174,10 +3245,9 @@ $dashboardYearOptions = range($dashboardMaxYear, $dashboardMinYear);
                     }
                 })
                 .catch(error => {
-                    Swal.fire(
-                        'Import gagal',
+                    showImportFailure(
                         error.message || 'Tidak dapat memproses file Excel.',
-                        'error'
+                        error.details || []
                     );
                 })
                 .finally(() => {

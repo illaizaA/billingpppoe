@@ -85,6 +85,29 @@ function salamImportRowValue(array $row, array $map, string $field): string
     return trim((string) ($row[$map[$field]] ?? ''));
 }
 
+function salamImportColumnLetter(int $zeroBasedIndex): string
+{
+    $number = $zeroBasedIndex + 1;
+    $letters = '';
+
+    while ($number > 0) {
+        $number--;
+        $letters = chr(65 + ($number % 26)) . $letters;
+        $number = intdiv($number, 26);
+    }
+
+    return $letters;
+}
+
+function salamImportCellLabel(array $map, string $field, string $fieldLabel): string
+{
+    if (!isset($map[$field])) {
+        return $fieldLabel;
+    }
+
+    return salamImportColumnLetter((int) $map[$field]) . ' (' . $fieldLabel . ')';
+}
+
 function salamImportNominal($value): ?float
 {
     $raw = trim((string) $value);
@@ -262,8 +285,11 @@ function salamImportReadSheetRows(
     foreach ($rowMatches[1] ?? [] as $rowXml) {
         $row = [];
 
+        // Sel kosong/self-closing harus dicocokkan lebih dahulu. Jika tidak,
+        // <c .../> dapat tertelan bersama sel sesudahnya dan indeks shared
+        // string (contoh: 107) terbaca sebagai isi kolom sebelumnya.
         preg_match_all(
-            '/<(?:[A-Za-z0-9_]+:)?c\b([^>]*)>(.*?)<\/(?:[A-Za-z0-9_]+:)?c>|<(?:[A-Za-z0-9_]+:)?c\b([^>]*)\/>/si',
+            '/<(?:[A-Za-z0-9_]+:)?c\b([^>]*)\/\s*>|<(?:[A-Za-z0-9_]+:)?c\b([^>]*)>(.*?)<\/(?:[A-Za-z0-9_]+:)?c>/si',
             $rowXml,
             $cellMatches,
             PREG_SET_ORDER
@@ -273,9 +299,9 @@ function salamImportReadSheetRows(
             $attrs = (string) (
                 ($cellMatch[1] ?? '') !== ''
                     ? $cellMatch[1]
-                    : ($cellMatch[3] ?? '')
+                    : ($cellMatch[2] ?? '')
             );
-            $body = (string) ($cellMatch[2] ?? '');
+            $body = (string) ($cellMatch[3] ?? '');
 
             if (!preg_match('/\br=["\']([A-Z]+)\d+["\']/i', $attrs, $refMatch)) {
                 continue;
@@ -438,6 +464,18 @@ function salamImportNormalizeStatus(string $value): ?string
     return null;
 }
 
+function salamImportNormalizeCustomerStatus(string $value): ?string
+{
+    $key = salamImportHeaderKey($value);
+    if ($key === 'aktif' || $key === 'active') {
+        return 'Aktif';
+    }
+    if (in_array($key, ['tidakaktif', 'nonaktif', 'inactive'], true)) {
+        return 'Tidak Aktif';
+    }
+    return null;
+}
+
 function salamImportGenerateCustomerCode(string $alamat, string $nama): string
 {
     $wilayah = salamKodeWilayah($alamat);
@@ -546,7 +584,7 @@ $historyImported = 0;
 $historySkipped = 0;
 
 // ============================================================
-// 1. IMPORT DATA PELANGGAN
+// PEMETAAN HEADER DAN VALIDASI AWAL (ALL-OR-NOTHING)
 // ============================================================
 $customerMap = [];
 if ($customerRows) {
@@ -561,11 +599,12 @@ if ($customerRows) {
         'alamat' => ['Alamat', 'Wilayah', 'Address'],
         'paket' => ['Paket', 'Paket Layanan', 'Package'],
         'tagihan' => ['Tarif Langganan', 'Tarif', 'Tagihan', 'Harga', 'Nominal'],
+        'status_pelanggan' => ['Status Pelanggan', 'Status Customer', 'Status Aktif'],
         'koordinat_x' => ['Koordinat X / Longitude', 'Koordinat X', 'Longitude'],
         'koordinat_y' => ['Koordinat Y / Latitude', 'Koordinat Y', 'Latitude'],
     ]);
 
-    $required = ['nama', 'alamat', 'paket', 'tagihan'];
+    $required = ['nama', 'nomor_pelanggan', 'alamat', 'paket', 'tagihan', 'status_pelanggan'];
     $missing = [];
     foreach ($required as $field) {
         if (!isset($customerMap[$field])) {
@@ -575,10 +614,12 @@ if ($customerRows) {
 
     if ($missing) {
         $labels = [
-            'nama' => 'Nama Pelanggan',
-            'alamat' => 'Alamat/Wilayah',
-            'paket' => 'Paket',
-            'tagihan' => 'Tarif Langganan',
+            'nama' => 'B (Nama Pelanggan)',
+            'nomor_pelanggan' => 'E (Nomor WhatsApp)',
+            'alamat' => 'G (Alamat)',
+            'paket' => 'H (Paket)',
+            'tagihan' => 'I (Tarif Langganan)',
+            'status_pelanggan' => 'J (Status Pelanggan)',
         ];
         $missingLabels = array_map(
             static fn(string $field): string => $labels[$field] ?? $field,
@@ -597,10 +638,239 @@ if ($customerRows) {
     }
 }
 
+$historyMap = [];
+if ($historyRows) {
+    $historyHeaders = array_shift($historyRows);
+    $historyMap = salamImportMapHeaders($historyHeaders, [
+        'id_pelanggan' => ['ID Pelanggan', 'IDPel', 'Customer ID'],
+        'periode' => ['Periode', 'Bulan', 'Periode Tagihan'],
+        'masa_aktif_sampai' => ['Masa Aktif Sampai', 'Jatuh Tempo', 'Tanggal Jatuh Tempo'],
+        'status_bayar' => ['Status Bayar', 'Status Pembayaran', 'Status'],
+        'nominal_tagihan' => ['Nominal Tagihan', 'Tagihan', 'Nominal', 'Tarif'],
+        'tanggal_bayar' => ['Tanggal Bayar', 'Tgl Bayar', 'Paid Date'],
+        'nominal_dibayar' => ['Nominal Dibayar', 'Jumlah Dibayar', 'Pembayaran'],
+    ]);
+
+    $historyRequiredHeaders = [
+        'id_pelanggan' => 'A (ID Pelanggan)',
+        'periode' => 'B (Periode)',
+        'masa_aktif_sampai' => 'C (Masa Aktif Sampai)',
+        'status_bayar' => 'D (Status Bayar)',
+        'nominal_tagihan' => 'E (Nominal Tagihan)',
+        'tanggal_bayar' => 'F (Tanggal Bayar)',
+        'nominal_dibayar' => 'G (Nominal Dibayar)',
+    ];
+    $historyMissing = [];
+    foreach ($historyRequiredHeaders as $field => $label) {
+        if (!isset($historyMap[$field])) {
+            $historyMissing[] = $label;
+        }
+    }
+    if ($historyMissing) {
+        salamImportExcelResponse(
+            false,
+            'Kolom pada sheet Riwayat Tagihan tidak lengkap: ' . implode(', ', $historyMissing) . '.',
+            0,
+            0,
+            [],
+            0,
+            0,
+            400
+        );
+    }
+}
+
+$validationErrors = [];
+$customerIdsInFile = [];
+
+foreach ($customerRows as $index => $row) {
+    $excelRow = $index + 2;
+    $nonEmpty = array_filter($row, static fn($value): bool => trim((string) $value) !== '');
+    if (!$nonEmpty) {
+        continue;
+    }
+
+    $requiredValues = [
+        'nama' => 'Nama Pelanggan',
+        'nomor_pelanggan' => 'Nomor WhatsApp',
+        'alamat' => 'Alamat',
+        'paket' => 'Paket',
+        'tagihan' => 'Tarif Langganan',
+        'status_pelanggan' => 'Status Pelanggan',
+    ];
+    foreach ($requiredValues as $field => $label) {
+        if (salamImportRowValue($row, $customerMap, $field) === '') {
+            $validationErrors[] = 'Sheet Data Pelanggan, baris ' . $excelRow
+                . ', kolom ' . salamImportCellLabel($customerMap, $field, $label)
+                . ': wajib diisi.';
+        }
+    }
+
+    $tarifRaw = salamImportRowValue($row, $customerMap, 'tagihan');
+    $tarif = salamImportNominal($tarifRaw);
+    if ($tarifRaw !== '' && ($tarif === null || $tarif < 0)) {
+        $validationErrors[] = 'Sheet Data Pelanggan, baris ' . $excelRow
+            . ', kolom ' . salamImportCellLabel($customerMap, 'tagihan', 'Tarif Langganan')
+            . ': harus berupa angka nol atau lebih.';
+    }
+
+    $statusRaw = salamImportRowValue($row, $customerMap, 'status_pelanggan');
+    if ($statusRaw !== '' && salamImportNormalizeCustomerStatus($statusRaw) === null) {
+        $validationErrors[] = 'Sheet Data Pelanggan, baris ' . $excelRow
+            . ', kolom ' . salamImportCellLabel($customerMap, 'status_pelanggan', 'Status Pelanggan')
+            . ': hanya boleh Aktif atau Tidak Aktif.';
+    }
+
+    $nomorRaw = preg_replace('/\s+/', '', salamImportRowValue($row, $customerMap, 'nomor_pelanggan')) ?? '';
+    if ($nomorRaw !== '' && !preg_match('/^\+?[0-9]{8,16}$/', $nomorRaw)) {
+        $validationErrors[] = 'Sheet Data Pelanggan, baris ' . $excelRow
+            . ', kolom ' . salamImportCellLabel($customerMap, 'nomor_pelanggan', 'Nomor WhatsApp')
+            . ': gunakan 8-16 angka, boleh diawali +.';
+    }
+
+    $nik = preg_replace('/\s+/', '', salamImportRowValue($row, $customerMap, 'nik')) ?? '';
+    if ($nik !== '' && !preg_match('/^[0-9]{8,32}$/', $nik)) {
+        $validationErrors[] = 'Sheet Data Pelanggan, baris ' . $excelRow
+            . ', kolom ' . salamImportCellLabel($customerMap, 'nik', 'NIK')
+            . ': jika diisi harus berupa 8-32 angka.';
+    }
+
+    $idPelanggan = salamImportRowValue($row, $customerMap, 'id_pelanggan');
+    if ($idPelanggan !== '') {
+        $idKey = salamImportHeaderKey($idPelanggan);
+        if (isset($customerIdsInFile[$idKey])) {
+            $validationErrors[] = 'Sheet Data Pelanggan, baris ' . $excelRow
+                . ', kolom ' . salamImportCellLabel($customerMap, 'id_pelanggan', 'ID Pelanggan')
+                . ': ID ' . $idPelanggan . ' duplikat dengan baris ' . $customerIdsInFile[$idKey] . '.';
+        } else {
+            $customerIdsInFile[$idKey] = $excelRow;
+        }
+    }
+}
+
+$historyKeysInFile = [];
+foreach ($historyRows as $index => $row) {
+    $excelRow = $index + 2;
+    $nonEmpty = array_filter($row, static fn($value): bool => trim((string) $value) !== '');
+    if (!$nonEmpty) {
+        continue;
+    }
+
+    foreach ([
+        'id_pelanggan' => 'ID Pelanggan',
+        'periode' => 'Periode',
+        'status_bayar' => 'Status Bayar',
+        'nominal_tagihan' => 'Nominal Tagihan',
+    ] as $field => $label) {
+        if (salamImportRowValue($row, $historyMap, $field) === '') {
+            $validationErrors[] = 'Sheet Riwayat Tagihan, baris ' . $excelRow
+                . ', kolom ' . salamImportCellLabel($historyMap, $field, $label)
+                . ': wajib diisi.';
+        }
+    }
+
+    $idPelanggan = salamImportRowValue($row, $historyMap, 'id_pelanggan');
+    $periodeRaw = salamImportRowValue($row, $historyMap, 'periode');
+    $periode = salamImportNormalizePeriod($periodeRaw);
+    if ($periodeRaw !== '' && $periode === null) {
+        $validationErrors[] = 'Sheet Riwayat Tagihan, baris ' . $excelRow
+            . ', kolom ' . salamImportCellLabel($historyMap, 'periode', 'Periode')
+            . ': gunakan format YYYY-MM.';
+    }
+
+    $masaAktifRaw = salamImportRowValue($row, $historyMap, 'masa_aktif_sampai');
+    if ($masaAktifRaw !== '' && salamImportNormalizeDate($masaAktifRaw) === null) {
+        $validationErrors[] = 'Sheet Riwayat Tagihan, baris ' . $excelRow
+            . ', kolom ' . salamImportCellLabel($historyMap, 'masa_aktif_sampai', 'Masa Aktif Sampai')
+            . ': gunakan format YYYY-MM-DD.';
+    }
+
+    $statusRaw = salamImportRowValue($row, $historyMap, 'status_bayar');
+    $statusBayar = salamImportNormalizeStatus($statusRaw);
+    if ($statusRaw !== '' && $statusBayar === null) {
+        $validationErrors[] = 'Sheet Riwayat Tagihan, baris ' . $excelRow
+            . ', kolom ' . salamImportCellLabel($historyMap, 'status_bayar', 'Status Bayar')
+            . ': hanya boleh Lunas atau Belum Lunas.';
+    }
+
+    $nominalRaw = salamImportRowValue($row, $historyMap, 'nominal_tagihan');
+    $nominal = salamImportNominal($nominalRaw);
+    if ($nominalRaw !== '' && ($nominal === null || $nominal < 0)) {
+        $validationErrors[] = 'Sheet Riwayat Tagihan, baris ' . $excelRow
+            . ', kolom ' . salamImportCellLabel($historyMap, 'nominal_tagihan', 'Nominal Tagihan')
+            . ': harus berupa angka nol atau lebih.';
+    }
+
+    $tanggalBayarRaw = salamImportRowValue($row, $historyMap, 'tanggal_bayar');
+    $nominalDibayarRaw = salamImportRowValue($row, $historyMap, 'nominal_dibayar');
+    $nominalDibayar = $nominalDibayarRaw !== '' ? salamImportNominal($nominalDibayarRaw) : null;
+
+    if ($statusBayar === 'Lunas') {
+        if ($tanggalBayarRaw === '') {
+            $validationErrors[] = 'Sheet Riwayat Tagihan, baris ' . $excelRow
+                . ', kolom ' . salamImportCellLabel($historyMap, 'tanggal_bayar', 'Tanggal Bayar')
+                . ': wajib diisi ketika status Lunas.';
+        } elseif (salamImportNormalizeDate($tanggalBayarRaw) === null) {
+            $validationErrors[] = 'Sheet Riwayat Tagihan, baris ' . $excelRow
+                . ', kolom ' . salamImportCellLabel($historyMap, 'tanggal_bayar', 'Tanggal Bayar')
+                . ': gunakan format YYYY-MM-DD.';
+        }
+        if ($nominalDibayarRaw === '') {
+            $validationErrors[] = 'Sheet Riwayat Tagihan, baris ' . $excelRow
+                . ', kolom ' . salamImportCellLabel($historyMap, 'nominal_dibayar', 'Nominal Dibayar')
+                . ': wajib diisi ketika status Lunas.';
+        } elseif ($nominalDibayar === null || $nominalDibayar < 0) {
+            $validationErrors[] = 'Sheet Riwayat Tagihan, baris ' . $excelRow
+                . ', kolom ' . salamImportCellLabel($historyMap, 'nominal_dibayar', 'Nominal Dibayar')
+                . ': harus berupa angka nol atau lebih.';
+        }
+    } elseif ($statusBayar === 'Belum Lunas') {
+        if ($tanggalBayarRaw !== '') {
+            $validationErrors[] = 'Sheet Riwayat Tagihan, baris ' . $excelRow
+                . ', kolom ' . salamImportCellLabel($historyMap, 'tanggal_bayar', 'Tanggal Bayar')
+                . ': harus dikosongkan ketika status Belum Lunas.';
+        }
+        if ($nominalDibayarRaw !== '' && ($nominalDibayar === null || $nominalDibayar != 0.0)) {
+            $validationErrors[] = 'Sheet Riwayat Tagihan, baris ' . $excelRow
+                . ', kolom ' . salamImportCellLabel($historyMap, 'nominal_dibayar', 'Nominal Dibayar')
+                . ': untuk Belum Lunas harus kosong atau 0.';
+        }
+    }
+
+    if ($idPelanggan !== '' && $periode !== null) {
+        $historyKey = salamImportHeaderKey($idPelanggan) . '|' . $periode;
+        if (isset($historyKeysInFile[$historyKey])) {
+            $validationErrors[] = 'Sheet Riwayat Tagihan, baris ' . $excelRow
+                . ': ID ' . $idPelanggan . ' dan periode ' . date('m/Y', strtotime($periode))
+                . ' duplikat dengan baris ' . $historyKeysInFile[$historyKey] . '.';
+        } else {
+            $historyKeysInFile[$historyKey] = $excelRow;
+        }
+    }
+}
+
+if ($validationErrors) {
+    salamImportExcelResponse(
+        false,
+        'Import dibatalkan. Perbaiki seluruh kolom yang ditandai; belum ada data yang disimpan.',
+        0,
+        0,
+        $validationErrors,
+        0,
+        0,
+        400
+    );
+}
+
+// ============================================================
+// 1. IMPORT DATA PELANGGAN
+// ============================================================
+
 $insertCustomer = $koneksi->prepare(
     'INSERT INTO pelanggan_salam
-     (id_pelanggan, kode_pelanggan, nama, nomor_pelanggan, alamat, paket, tarif_langganan, tagihan)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+     (id_pelanggan, kode_pelanggan, nama, nomor_pelanggan, alamat, paket,
+      tarif_langganan, tagihan, status_pelanggan)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
 );
 $fixCustomer = $koneksi->prepare(
     'UPDATE pelanggan_salam SET id_pelanggan = ?, nomor_invoice = ? WHERE id = ?'
@@ -631,15 +901,30 @@ foreach ($customerRows as $index => $row) {
     $alamat = salamNormalisasiAlamatInput(salamImportRowValue($row, $customerMap, 'alamat'));
     $paket = salamImportRowValue($row, $customerMap, 'paket');
     $tarif = salamImportNominal(salamImportRowValue($row, $customerMap, 'tagihan'));
+    $statusPelanggan = salamImportNormalizeCustomerStatus(
+        salamImportRowValue($row, $customerMap, 'status_pelanggan')
+    ) ?? 'Aktif';
     $kodePelanggan = salamImportRowValue($row, $customerMap, 'kode_pelanggan');
     $koordinatXRaw = salamImportRowValue($row, $customerMap, 'koordinat_x');
     $koordinatYRaw = salamImportRowValue($row, $customerMap, 'koordinat_y');
-    $koordinatX = $koordinatXRaw !== '' && is_numeric($koordinatXRaw) ? (float) $koordinatXRaw : null;
-    $koordinatY = $koordinatYRaw !== '' && is_numeric($koordinatYRaw) ? (float) $koordinatYRaw : null;
-
-    if ($nama === '' && $namaKtp !== '') {
-        $nama = $namaKtp;
+    // Koordinat bersifat opsional. Data pelanggan tetap diimpor ketika
+    // koordinat kosong, hanya terisi satu, atau formatnya belum dapat dibaca.
+    // Koordinat hanya disimpan jika pasangan X/Y dapat dipakai dengan aman.
+    $koordinatX = null;
+    $koordinatY = null;
+    if ($koordinatXRaw !== '' && $koordinatYRaw !== ''
+        && is_numeric($koordinatXRaw) && is_numeric($koordinatYRaw)
+    ) {
+        $candidateX = (float) $koordinatXRaw;
+        $candidateY = (float) $koordinatYRaw;
+        if ($candidateX >= -180 && $candidateX <= 180
+            && $candidateY >= -90 && $candidateY <= 90
+        ) {
+            $koordinatX = $candidateX;
+            $koordinatY = $candidateY;
+        }
     }
+
     if ($namaKtp === '') {
         $namaKtp = $nama;
     }
@@ -653,24 +938,6 @@ foreach ($customerRows as $index => $row) {
     if ($nik !== '' && !preg_match('/^[0-9]{8,32}$/', $nik)) {
         $skipped++;
         $errors[] = "Data Pelanggan baris {$excelRow}: NIK hanya boleh 8-32 angka.";
-        continue;
-    }
-
-    if (($koordinatXRaw === '') !== ($koordinatYRaw === '')) {
-        $skipped++;
-        $errors[] = "Data Pelanggan baris {$excelRow}: Koordinat X / Longitude dan Koordinat Y / Latitude harus diisi berpasangan.";
-        continue;
-    }
-
-    if ($koordinatXRaw !== '' && (!is_numeric($koordinatXRaw) || $koordinatX < -180 || $koordinatX > 180)) {
-        $skipped++;
-        $errors[] = "Data Pelanggan baris {$excelRow}: Koordinat X / Longitude harus berupa angka antara -180 sampai 180.";
-        continue;
-    }
-
-    if ($koordinatYRaw !== '' && (!is_numeric($koordinatYRaw) || $koordinatY < -90 || $koordinatY > 90)) {
-        $skipped++;
-        $errors[] = "Data Pelanggan baris {$excelRow}: Koordinat Y / Latitude harus berupa angka antara -90 sampai 90.";
         continue;
     }
 
@@ -702,7 +969,7 @@ foreach ($customerRows as $index => $row) {
     $koneksi->begin_transaction();
     try {
         $insertCustomer->bind_param(
-            'ssssssdd',
+            'ssssssdds',
             $idPelanggan,
             $kodePelanggan,
             $nama,
@@ -710,7 +977,8 @@ foreach ($customerRows as $index => $row) {
             $alamat,
             $paket,
             $tarif,
-            $tarif
+            $tarif,
+            $statusPelanggan
         );
 
         if (!$insertCustomer->execute()) {
@@ -761,38 +1029,6 @@ $checkCustomerCode->close();
 // 2. IMPORT RIWAYAT TAGIHAN (OPSIONAL)
 // ============================================================
 if ($historyRows) {
-    $historyHeaders = array_shift($historyRows);
-    $historyMap = salamImportMapHeaders($historyHeaders, [
-        'id_pelanggan' => ['ID Pelanggan', 'IDPel', 'Customer ID'],
-        'periode' => ['Periode', 'Bulan', 'Periode Tagihan'],
-        'status_bayar' => ['Status Bayar', 'Status Pembayaran', 'Status'],
-        'nominal_tagihan' => ['Nominal Tagihan', 'Tagihan', 'Nominal', 'Tarif'],
-        'tanggal_bayar' => ['Tanggal Bayar', 'Tgl Bayar', 'Paid Date'],
-    ]);
-
-    $historyRequired = ['id_pelanggan', 'periode', 'status_bayar'];
-    $historyMissing = [];
-    foreach ($historyRequired as $field) {
-        if (!isset($historyMap[$field])) {
-            $historyMissing[] = $field;
-        }
-    }
-
-    if ($historyMissing) {
-        $labels = [
-            'id_pelanggan' => 'ID Pelanggan',
-            'periode' => 'Periode',
-            'status_bayar' => 'Status Bayar',
-        ];
-        $historyMissingLabels = array_map(
-            static fn(string $field): string => $labels[$field] ?? $field,
-            $historyMissing
-        );
-        $errors[] = 'Sheet Riwayat Tagihan dilewati karena kolom wajib tidak lengkap: '
-            . implode(', ', $historyMissingLabels) . '.';
-        $historyRows = [];
-    }
-
     $findCustomer = $koneksi->prepare(
         'SELECT id, id_pelanggan, nama, alamat, paket, tarif_langganan
          FROM pelanggan_salam
@@ -852,8 +1088,14 @@ if ($historyRows) {
         $periode = salamImportNormalizePeriod(salamImportRowValue($row, $historyMap, 'periode'));
         $statusBayar = salamImportNormalizeStatus(salamImportRowValue($row, $historyMap, 'status_bayar'));
         $nominalInput = salamImportNominal(salamImportRowValue($row, $historyMap, 'nominal_tagihan'));
+        $masaAktifRaw = salamImportRowValue($row, $historyMap, 'masa_aktif_sampai');
+        $masaAktifSampai = $masaAktifRaw !== '' ? salamImportNormalizeDate($masaAktifRaw) : null;
         $tanggalBayarRaw = salamImportRowValue($row, $historyMap, 'tanggal_bayar');
         $tanggalBayar = $tanggalBayarRaw !== '' ? salamImportNormalizeDate($tanggalBayarRaw) : null;
+        $nominalDibayarRaw = salamImportRowValue($row, $historyMap, 'nominal_dibayar');
+        $nominalDibayarInput = $nominalDibayarRaw !== ''
+            ? salamImportNominal($nominalDibayarRaw)
+            : null;
 
         if ($idPelanggan === '' || $periode === null || $statusBayar === null) {
             $historySkipped++;
@@ -896,8 +1138,8 @@ if ($historyRows) {
             continue;
         }
 
-        $jatuhTempo = date('Y-m-t', strtotime($periode));
-        $nominalDibayar = $statusBayar === 'Lunas' ? $nominalTagihan : null;
+        $jatuhTempo = $masaAktifSampai ?? date('Y-m-t', strtotime($periode));
+        $nominalDibayar = $statusBayar === 'Lunas' ? $nominalDibayarInput : null;
         if ($statusBayar !== 'Lunas') {
             $tanggalBayar = null;
         }
@@ -944,7 +1186,7 @@ if ($historyRows) {
 
             // Jika riwayat yang diimpor adalah bulan berjalan, sinkronkan kondisi dashboard.
             if ($periode === date('Y-m-01')) {
-                $currentEnd = date('Y-m-t', strtotime($periode));
+                $currentEnd = $jatuhTempo;
                 $currentTagihan = $statusBayar === 'Lunas' ? 0.0 : $nominalTagihan;
                 $syncCurrent->bind_param(
                     'sssdsdsi',
@@ -980,15 +1222,19 @@ if ($historyRows) {
 
 $koneksi->close();
 
-if ($imported === 0 && $historyImported === 0 && $skipped === 0 && $historySkipped === 0) {
+if ($imported === 0 && $historyImported === 0) {
+    $message = ($skipped === 0 && $historySkipped === 0)
+        ? 'Tidak ada data yang diisi. Isi sheet Data Pelanggan dan/atau Riwayat Tagihan.'
+        : "Import gagal. Tidak ada data valid yang berhasil disimpan. Dilewati: {$skipped} pelanggan dan {$historySkipped} riwayat.";
+
     salamImportExcelResponse(
         false,
-        'Tidak ada data yang diisi. Isi sheet Data Pelanggan dan/atau Riwayat Tagihan.',
+        $message,
         0,
-        0,
+        $skipped,
         $errors,
         0,
-        0,
+        $historySkipped,
         400
     );
 }
