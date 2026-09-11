@@ -25,14 +25,17 @@ try {
 
     $range = analitikResolvePeriodRange($_GET);
     $scope = analitikResolveWilayah($_GET['wilayah'] ?? 'all');
-    $map = analitikBuildPppoeMap($koneksi, $range['awal'], $range['akhir'], $scope);
+    $map = analitikBuildPppoeMap($koneksi, $range['awal'], $range['akhir'], $scope, $range);
 
     echo json_encode([
         'success' => true,
         'read_only' => true,
         'periode' => [
+            'filter_tipe' => $range['filter_tipe'],
             'awal' => $range['awal'],
             'akhir' => $range['akhir'],
+            'tanggal_awal' => $range['tanggal_awal'],
+            'tanggal_akhir' => $range['tanggal_akhir'],
         ],
         'scope' => [
             'label' => $scope['label'],

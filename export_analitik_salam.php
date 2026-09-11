@@ -12,7 +12,7 @@ try {
 
     $range = analitikResolvePeriodRange($_GET);
     $scope = analitikResolveWilayah($_GET['wilayah'] ?? 'all');
-    $data = analitikBuild($koneksi, $range['awal'], $range['akhir'], $scope);
+    $data = analitikBuild($koneksi, $range['awal'], $range['akhir'], $scope, $range);
     $records = $data['records'] ?? [];
     $mode = strtolower(trim((string) ($_GET['mode'] ?? 'all')));
     $analytic = strtolower(trim((string) ($_GET['analytic'] ?? '')));
@@ -129,7 +129,7 @@ try {
             ];
         }
 
-        $customers = array_values($data['unpaid_customers'] ?? []);
+        $customers = array_values($data['overdue_customers'] ?? []);
         $rows = [];
         foreach ($customers as $item) {
             $rows[] = [
@@ -149,14 +149,14 @@ try {
             'subtitle' => 'Daftar pelanggan yang perlu diprioritaskan untuk penagihan',
             'meta' => $meta,
             'summary' => [
-                ['label' => 'Pelanggan Belum Bayar', 'value' => count($customers), 'type' => 'integer'],
+                ['label' => 'Pelanggan Menunggak', 'value' => count($customers), 'type' => 'integer'],
                 ['label' => 'Total Tunggakan', 'value' => $total, 'type' => 'money'],
             ],
             'columns' => [
                 ['label' => 'ID Pelanggan', 'type' => 'text', 'width' => 18],
                 ['label' => 'Nama Pelanggan', 'type' => 'text', 'width' => 25],
                 ['label' => 'Paket', 'type' => 'text', 'width' => 20],
-                ['label' => 'Tagihan Tertua', 'type' => 'text', 'width' => 18],
+                ['label' => 'Tunggakan Tertua', 'type' => 'text', 'width' => 18],
                 ['label' => 'Bulan Belum Lunas', 'type' => 'integer', 'width' => 18],
                 ['label' => 'Lama Tunggakan (Bulan)', 'type' => 'integer', 'width' => 22],
                 ['label' => 'Total Tunggakan', 'type' => 'money', 'width' => 20],
@@ -165,10 +165,9 @@ try {
         ];
     };
 
-    $outstandingSheet = static function () use ($data, $records, $scope, $meta): array {
+    $outstandingSheet = static function () use ($data, $scope, $meta): array {
         $stats = [];
-        foreach ($records as $record) {
-            if (($record['status_bayar'] ?? '') === 'Lunas') continue;
+        foreach (array_values($data['overdue_records'] ?? []) as $record) {
             $key = !empty($scope['is_all']) ? (string)($record['wilayah'] ?? '-') : (string)($record['periode'] ?? '');
             if (!isset($stats[$key])) $stats[$key] = ['tagihan' => 0, 'pelanggan' => [], 'tunggakan' => 0.0];
             $stats[$key]['tagihan']++;
@@ -201,7 +200,7 @@ try {
                 ['label' => !empty($scope['is_all']) ? 'Wilayah' : 'Periode', 'type' => 'text', 'width' => 20],
                 ['label' => 'Total Tunggakan', 'type' => 'money', 'width' => 20],
                 ['label' => 'Pelanggan Menunggak', 'type' => 'integer', 'width' => 21],
-                ['label' => 'Tagihan Belum Lunas', 'type' => 'integer', 'width' => 20],
+                ['label' => 'Tagihan Menunggak', 'type' => 'integer', 'width' => 20],
             ],
             'rows' => $rows,
         ];
@@ -298,7 +297,7 @@ try {
         ];
     };
 
-    $detailSheet = static function (string $type, string $key) use ($data, $records, $scope, $meta): array {
+    $detailSheet = static function (string $type, string $key) use ($data, $records, $scope, $meta, $range): array {
         $columns = [];
         $rows = [];
         $summary = [];
@@ -323,7 +322,7 @@ try {
             $filtered = array_values(array_filter($records, static fn($r) => ($r['periode'] ?? '') === $key));
             $paid = count(array_filter($filtered, static fn($r) => ($r['status_bayar'] ?? '') === 'Lunas'));
             $paidAmount = array_sum(array_map(static fn($r) => (float)($r['nominal_dibayar'] ?? 0), $filtered));
-            $outstanding = array_sum(array_map(static fn($r) => ($r['status_bayar'] ?? '') === 'Belum Lunas' ? (float)($r['nominal_tagihan'] ?? 0) : 0, $filtered));
+            $outstanding = array_sum(array_map(static fn($r) => analitikIsOverdue($r, $range) ? (float)($r['nominal_tagihan'] ?? 0) : 0, $filtered));
             $title = 'Pembayaran ' . analitikPeriodLabel($key);
             $sheetName = 'Detail Perkembangan Bayar';
             $summary = [
@@ -380,15 +379,15 @@ try {
             $columns = [
                 ['label'=>'ID Pelanggan','type'=>'text','width'=>18], ['label'=>'Nama Pelanggan','type'=>'text','width'=>25],
                 ['label'=>'Wilayah','type'=>'text','width'=>18], ['label'=>'Tagihan Tertua','type'=>'text','width'=>18],
-                ['label'=>'Periode Belum Lunas','type'=>'integer','width'=>20], ['label'=>'Total Tunggakan','type'=>'money','width'=>20],
+                ['label'=>'Periode Belum Lunas','type'=>'integer','width'=>20], ['label'=>'Total Belum Dibayar','type'=>'money','width'=>20],
             ];
             $rows = array_map(static fn($r) => [
                 (string)($r['id_pelanggan'] ?? '-'), (string)($r['nama'] ?? '-'), (string)($r['wilayah'] ?? '-'),
                 analitikPeriodLabel((string)($r['periode_tertua'] ?? '')), (int)($r['jumlah_periode'] ?? 0), (float)($r['total_tunggakan'] ?? 0),
             ], $customers);
         } elseif ($type === 'outstanding') {
-            $filtered = array_values(array_filter($records, static function ($r) use ($scope, $key) {
-                if (($r['status_bayar'] ?? '') !== 'Belum Lunas') return false;
+            $overdueRecords = array_values($data['overdue_records'] ?? []);
+            $filtered = array_values(array_filter($overdueRecords, static function ($r) use ($scope, $key) {
                 return !empty($scope['is_all']) ? (($r['wilayah'] ?? '') === $key) : (($r['periode'] ?? '') === $key);
             }));
             $title = !empty($scope['is_all']) ? 'Rincian Tunggakan - ' . $key : 'Rincian Tunggakan - ' . analitikPeriodLabel($key);
@@ -407,13 +406,37 @@ try {
                 ['label'=>'ID Pelanggan','type'=>'text','width'=>18], ['label'=>'Nama Pelanggan','type'=>'text','width'=>25],
                 ['label'=>'Wilayah','type'=>'text','width'=>18], ['label'=>'Periode','type'=>'text','width'=>16],
                 ['label'=>'Status','type'=>'status','width'=>15], ['label'=>'Tagihan','type'=>'money','width'=>18],
-                ['label'=>'Dibayar','type'=>'money','width'=>18], ['label'=>'Tanggal Bayar','type'=>'text','width'=>18],
+                ['label'=>'Dibayar','type'=>'money','width'=>18],
             ];
-            $rows = array_map($billRow, $filtered);
+            $rows = array_map(static fn($r) => [
+                (string)($r['id_pelanggan'] ?? '-'),
+                (string)($r['nama'] ?? '-'),
+                (string)($r['wilayah'] ?? '-'),
+                analitikPeriodLabel((string)($r['periode'] ?? '')),
+                (string)($r['status_bayar'] ?? '-'),
+                (float)($r['nominal_tagihan'] ?? 0),
+                (float)($r['nominal_dibayar'] ?? 0),
+            ], $filtered);
         } elseif ($type === 'customer' || $type === 'top') {
             $customerId = (int)$key;
             if ($customerId <= 0) throw new RuntimeException('Pelanggan detail tidak valid.');
-            $filtered = array_values(array_filter($records, static fn($r) => (int)($r['pelanggan_id'] ?? 0) === $customerId));
+
+            $selectedCustomerRows = array_values(array_filter($records, static fn($r) => (int)($r['pelanggan_id'] ?? 0) === $customerId));
+            $customerOverdue = array_values(array_filter(
+                $data['overdue_records'] ?? [],
+                static fn($r) => (int)($r['pelanggan_id'] ?? 0) === $customerId
+            ));
+
+            if ($type === 'customer') {
+                $byPeriod = [];
+                foreach ($customerOverdue as $r) $byPeriod[(string)($r['periode'] ?? '')] = $r;
+                foreach ($selectedCustomerRows as $r) $byPeriod[(string)($r['periode'] ?? '')] = $r;
+                $filtered = array_values($byPeriod);
+            } else {
+                // Ranking rajin bayar tetap murni mengikuti rentang filter.
+                $filtered = $selectedCustomerRows;
+            }
+
             if (!$filtered) throw new RuntimeException('Data pelanggan tidak ditemukan pada periode dan wilayah ini.');
             usort($filtered, static fn($a, $b) => strcmp((string)($a['periode'] ?? ''), (string)($b['periode'] ?? '')));
             $first = $filtered[0];
@@ -422,7 +445,9 @@ try {
             $paid = count(array_filter($filtered, static fn($r) => ($r['status_bayar'] ?? '') === 'Lunas'));
             $total = count($filtered);
             $unpaid = $total - $paid;
-            $outstanding = array_sum(array_map(static fn($r) => ($r['status_bayar'] ?? '') === 'Lunas' ? 0 : (float)($r['nominal_tagihan'] ?? 0), $filtered));
+            $outstanding = $type === 'customer'
+                ? array_sum(array_map(static fn($r) => (float)($r['nominal_tagihan'] ?? 0), $customerOverdue))
+                : array_sum(array_map(static fn($r) => analitikIsOverdue($r, $range) ? (float)($r['nominal_tagihan'] ?? 0) : 0, $filtered));
             $summary = [
                 ['label'=>'ID Pelanggan','value'=>(string)($first['id_pelanggan'] ?? '-'),'type'=>'text'],
                 ['label'=>'Wilayah','value'=>(string)($first['wilayah'] ?? '-'),'type'=>'text'],
@@ -441,7 +466,7 @@ try {
                 (float)($r['nominal_tagihan'] ?? 0), (float)($r['nominal_dibayar'] ?? 0), salamBulananIndonesia($r['tanggal_bayar'] ?? null, true),
             ], $filtered);
         } elseif ($type === 'aging') {
-            $customers = array_values($data['unpaid_customers'] ?? []);
+            $customers = array_values($data['overdue_customers'] ?? []);
             $filtered = array_values(array_filter($customers, static function ($r) use ($key) {
                 $age = (int)($r['lama_bulan'] ?? 1);
                 if ($key === '1') return $age <= 1;
@@ -595,15 +620,47 @@ try {
         );
     };
 
-    $outstandingDetailSheet = static function () use ($records, $meta, $billingDetailSheet): array {
-        $items = array_values(array_filter($records, static fn($r) => (string)($r['status_bayar'] ?? '') !== 'Lunas'));
-        return $billingDetailSheet(
-            'Detail Tunggakan',
-            'Detail Tunggakan',
-            'Daftar tagihan yang menjadi dasar perhitungan total tunggakan',
-            $items,
-            $meta
-        );
+    $outstandingDetailSheet = static function () use ($data, $meta, $sortBillingRecords): array {
+        $items = $sortBillingRecords(array_values($data['overdue_records'] ?? []));
+        $rows = [];
+        foreach ($items as $r) {
+            $status = (string)($r['status_bayar'] ?? '-');
+            $tagihan = (float)($r['nominal_tagihan'] ?? 0);
+            $dibayar = (float)($r['nominal_dibayar'] ?? 0);
+            $rows[] = [
+                analitikPeriodLabel((string)($r['periode'] ?? '')),
+                (string)($r['id_pelanggan'] ?? '-'),
+                (string)($r['nama'] ?? '-'),
+                (string)($r['wilayah'] ?? '-'),
+                (string)($r['paket'] ?? '-'),
+                $status,
+                $tagihan,
+                $dibayar,
+                $status === 'Lunas' ? 0.0 : $tagihan,
+            ];
+        }
+
+        return [
+            'name' => 'Detail Tunggakan',
+            'title' => 'Detail Tunggakan',
+            'subtitle' => 'Daftar tagihan yang menjadi dasar perhitungan total tunggakan',
+            'meta' => $meta,
+            'summary' => [
+                ['label' => 'Jumlah Data', 'value' => count($rows), 'type' => 'integer'],
+            ],
+            'columns' => [
+                ['label'=>'Periode','type'=>'text','width'=>18],
+                ['label'=>'ID Pelanggan','type'=>'text','width'=>18],
+                ['label'=>'Nama Pelanggan','type'=>'text','width'=>25],
+                ['label'=>'Wilayah','type'=>'text','width'=>18],
+                ['label'=>'Paket','type'=>'text','width'=>20],
+                ['label'=>'Status','type'=>'status','width'=>16],
+                ['label'=>'Tagihan','type'=>'money','width'=>18],
+                ['label'=>'Dibayar','type'=>'money','width'=>18],
+                ['label'=>'Sisa Belum Dibayar','type'=>'money','width'=>21],
+            ],
+            'rows' => $rows,
+        ];
     };
 
     $topDetailSheet = static function () use ($data, $records, $meta, $sortBillingRecords): array {

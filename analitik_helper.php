@@ -114,9 +114,9 @@ function analitikResolvePeriodRange(array $source): array
     $validYear = static fn(string $y): bool => (bool) preg_match('/^\d{4}$/', $y);
 
     if ($filterTipe === 'tanggal') {
-        // Data tagihan disimpan per periode bulanan. Rentang tanggal diterjemahkan
-        // menjadi seluruh bulan yang tersentuh agar tagihan lunas dan belum lunas
-        // tetap dihitung dengan dasar yang sama pada semua panel.
+        // Tagihan tetap dibaca dari bulan yang tersentuh oleh rentang tanggal.
+        // Penyaringan tanggal pembayaran yang sebenarnya dilakukan setelah data
+        // tagihan dimuat, sehingga seluruh panel memakai dasar data yang sama.
         $awal = substr($tanggalAwal, 0, 7);
         $akhir = substr($tanggalAkhir, 0, 7);
     } else {
@@ -207,6 +207,329 @@ function analitikPreviousPeriod(string $ym): string
     return $date ? $date->modify('-1 month')->format('Y-m') : '';
 }
 
+function analitikTanggalBayarYmd($value): string
+{
+    $value = trim((string) $value);
+    if ($value === '') return '';
+
+    $timestamp = strtotime($value);
+    if ($timestamp === false) return '';
+
+    return date('Y-m-d', $timestamp);
+}
+
+
+/**
+ * Tanggal acuan untuk menentukan kondisi tunggakan.
+ *
+ * Rentang BULAN:
+ * - satu bulan dianggap satu periode billing penuh;
+ * - acuan memakai hari terakhir dari bulan akhir yang dipilih;
+ * - tunggakan lama dari bulan sebelum awal filter tetap dibawa selama belum lunas;
+ * - bulan berjalan tetap dinilai sebagai satu periode penuh, sehingga tagihan
+ *   Belum Lunas pada bulan tersebut tidak hilang hanya karena hari ini belum
+ *   mencapai tanggal jatuh tempo di akhir bulan.
+ *
+ * Rentang TANGGAL:
+ * - memakai tanggal akhir filter secara harian;
+ * - jatuh tempo setelah tanggal akhir belum dianggap tunggakan;
+ * - bila tanggal akhir berada di masa depan, dibatasi sampai hari ini.
+ */
+function analitikTanggalAcuanTunggakan(?array $range = null): string
+{
+    $today = date('Y-m-d');
+    $filterTipe = strtolower(trim((string) ($range['filter_tipe'] ?? 'bulan')));
+
+    if ($filterTipe === 'bulan') {
+        $akhir = trim((string) ($range['akhir'] ?? ''));
+        if (preg_match('/^\d{4}-\d{2}$/', $akhir)) {
+            $date = DateTimeImmutable::createFromFormat('!Y-m-d', $akhir . '-01');
+            if ($date !== false) {
+                // Untuk pilihan bulan, nilai sampai akhir periode bulan tersebut.
+                // Jika user memilih bulan masa depan, jangan melampaui hari ini.
+                $currentMonth = date('Y-m');
+                if (strcmp($akhir, $currentMonth) > 0) {
+                    return $today;
+                }
+                return $date->modify('last day of this month')->format('Y-m-d');
+            }
+        }
+    }
+
+    $candidate = trim((string) ($range['tanggal_akhir'] ?? ''));
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $candidate)) {
+        return $today;
+    }
+
+    return strcmp($candidate, $today) > 0 ? $today : $candidate;
+}
+
+/**
+ * Sebuah tagihan disebut tunggakan hanya jika:
+ * 1) status pada snapshot analitik masih Belum Lunas; dan
+ * 2) tanggal jatuh tempo valid serta sudah tercapai/terlewati pada tanggal
+ *    acuan analitik.
+ *
+ * Data tanpa tanggal jatuh tempo tidak dipaksakan menjadi tunggakan karena
+ * tidak dapat diverifikasi waktunya.
+ */
+function analitikIsOverdue(array $row, ?array $range = null): bool
+{
+    if (($row['status_bayar'] ?? '') === 'Lunas') return false;
+
+    $dueRaw = trim((string) ($row['tanggal_jatuh_tempo'] ?? ''));
+
+    // Fallback aman untuk data lama yang belum memiliki tanggal jatuh tempo:
+    // gunakan hari terakhir dari periode tagihannya. Ini hanya dipakai untuk
+    // membaca analitik; database tidak diubah dari fungsi ini.
+    if ($dueRaw === '' || $dueRaw === '0000-00-00' || $dueRaw === '0000-00-00 00:00:00') {
+        $periodeRaw = trim((string) ($row['periode_tanggal'] ?? $row['periode'] ?? ''));
+        if (preg_match('/^(\d{4})-(\d{2})/', $periodeRaw, $m)) {
+            $periodeDate = DateTimeImmutable::createFromFormat('!Y-m-d', $m[1] . '-' . $m[2] . '-01');
+            if ($periodeDate !== false) {
+                $dueRaw = $periodeDate->modify('last day of this month')->format('Y-m-d');
+            }
+        }
+    }
+
+    if ($dueRaw === '') return false;
+
+    $dueTs = strtotime($dueRaw);
+    if ($dueTs === false) return false;
+
+    $due = date('Y-m-d', $dueTs);
+    if ($due === '0000-00-00') return false;
+
+    return strcmp($due, analitikTanggalAcuanTunggakan($range)) <= 0;
+}
+
+function analitikFilterOverdueRecords(array $records, ?array $range = null): array
+{
+    return array_values(array_filter(
+        $records,
+        static fn(array $row): bool => analitikIsOverdue($row, $range)
+    ));
+}
+
+
+/**
+ * Cari periode tagihan paling awal yang tersedia untuk cakupan wilayah.
+ * Dipakai khusus untuk membawa tunggakan lama ke periode analitik berikutnya.
+ */
+function analitikEarliestBillingPeriod(mysqli $koneksi, array $scope, string $fallback): string
+{
+    $whereP = '';
+    $whereT = '';
+    $types = '';
+    $params = [];
+
+    if (empty($scope['is_all'])) {
+        $whereP = ' WHERE ' . salamSqlNormalisasiAlamat('p.alamat') . ' = ?';
+        $whereT = ' WHERE ('
+            . salamSqlNormalisasiAlamat('t.alamat_snapshot') . ' = ?'
+            . " OR (TRIM(COALESCE(t.alamat_snapshot, '')) = '' AND "
+            . salamSqlNormalisasiAlamat('p.alamat') . ' = ?))';
+        $types = 'sss';
+        $regionKey = salamNormalisasiKunci($scope['value']);
+        $params[] = $regionKey;
+        $params[] = $regionKey;
+        $params[] = $regionKey;
+    }
+
+    $sql = "
+        SELECT MIN(periode_min) AS periode_min
+        FROM (
+            SELECT DATE_FORMAT(MIN(p.waktu), '%Y-%m') AS periode_min
+            FROM pelanggan_salam p
+            {$whereP}
+
+            UNION ALL
+
+            SELECT DATE_FORMAT(MIN(t.periode), '%Y-%m') AS periode_min
+            FROM tagihan_salam t
+            LEFT JOIN pelanggan_salam p ON p.id = t.pelanggan_id
+            {$whereT}
+        ) z
+        WHERE periode_min IS NOT NULL
+    ";
+
+    $stmt = $koneksi->prepare($sql);
+    if (!$stmt) return $fallback;
+
+    if ($types !== '') {
+        analitikBindParams($stmt, $types, $params);
+    }
+
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $row = $result ? $result->fetch_assoc() : null;
+    $stmt->close();
+
+    $periode = trim((string) ($row['periode_min'] ?? ''));
+    return preg_match('/^\\d{4}-\\d{2}$/', $periode) ? $periode : $fallback;
+}
+
+/**
+ * Bentuk kondisi tagihan "per tanggal acuan".
+ *
+ * Khusus perhitungan tunggakan, tanggal awal filter tidak menghapus tunggakan
+ * lama. Yang dilihat adalah kondisi sampai tanggal akhir/acuan:
+ * - jika tagihan belum lunas, tetap dianggap belum lunas;
+ * - jika sekarang sudah Lunas tetapi tanggal bayarnya setelah tanggal acuan,
+ *   maka pada tanggal acuan tagihan tersebut masih dianggap belum lunas;
+ * - jika sudah dibayar pada/sebelum tanggal acuan, tidak termasuk tunggakan.
+ *
+ * Database tidak diubah; penyesuaian hanya pada salinan array analitik.
+ */
+function analitikApplyArrearsCutoffState(array $records, ?array $range = null): array
+{
+    $cutoff = analitikTanggalAcuanTunggakan($range);
+    $result = [];
+
+    foreach ($records as $row) {
+        $statusAsli = (string) ($row['status_bayar'] ?? '');
+        $tanggalBayarAsli = $row['tanggal_bayar'] ?? null;
+        $nominalDibayarAsli = (float) ($row['nominal_dibayar'] ?? 0);
+
+        $row['status_bayar_asli'] = $statusAsli;
+        $row['tanggal_bayar_asli'] = $tanggalBayarAsli;
+        $row['nominal_dibayar_asli'] = $nominalDibayarAsli;
+
+        if ($statusAsli !== 'Lunas') {
+            $result[] = $row;
+            continue;
+        }
+
+        $tanggalBayar = analitikTanggalBayarYmd($tanggalBayarAsli);
+
+        // Sudah lunas pada/sebelum tanggal acuan -> tidak lagi menjadi tunggakan.
+        if ($tanggalBayar !== '' && strcmp($tanggalBayar, $cutoff) <= 0) {
+            continue;
+        }
+
+        // Jika data lama sudah berstatus Lunas tetapi tanggal bayarnya kosong,
+        // jangan membuat tunggakan palsu karena waktunya tidak dapat diverifikasi.
+        if ($tanggalBayar === '') {
+            continue;
+        }
+
+        // Dibayar setelah tanggal acuan -> pada tanggal acuan masih belum lunas.
+        $row['status_bayar'] = 'Belum Lunas';
+        $row['nominal_dibayar'] = 0.0;
+        $row['tanggal_bayar'] = null;
+        $result[] = $row;
+    }
+
+    return array_values($result);
+}
+
+/**
+ * Ambil seluruh tunggakan yang masih aktif sampai tanggal acuan.
+ *
+ * Dataset analitik utama tetap mengikuti rentang filter, tetapi tunggakan dibaca
+ * sejak riwayat tagihan paling awal agar tunggakan bulan sebelumnya tidak hilang
+ * hanya karena bulan tersebut berada sebelum tanggal awal filter.
+ */
+function analitikLoadOverdueRecordsAsOf(
+    mysqli $koneksi,
+    string $periodeAkhir,
+    array $scope,
+    ?array $range = null
+): array {
+    $cutoff = analitikTanggalAcuanTunggakan($range);
+    $cutoffPeriod = substr($cutoff, 0, 7);
+    if (!preg_match('/^\\d{4}-\\d{2}$/', $cutoffPeriod)) {
+        $cutoffPeriod = $periodeAkhir;
+    }
+
+    $earliest = analitikEarliestBillingPeriod($koneksi, $scope, $cutoffPeriod);
+    if (strcmp($earliest, $cutoffPeriod) > 0) {
+        $earliest = $cutoffPeriod;
+    }
+
+    $records = analitikLoadRecords($koneksi, $earliest, $cutoffPeriod, $scope);
+    $records = analitikApplyArrearsCutoffState($records, $range);
+
+    return analitikFilterOverdueRecords($records, $range);
+}
+
+/**
+ * Menyamakan seluruh analitik dengan filter yang dipilih.
+ *
+ * Mode bulan:
+ * - perilaku lama dipertahankan; seluruh tagihan pada bulan terpilih dihitung.
+ *
+ * Mode tanggal:
+ * - tagihan dibaca dari bulan yang tersentuh rentang tanggal;
+ * - pembayaran sebelum tanggal awal tidak dimasukkan karena sudah selesai
+ *   sebelum rentang analisis dimulai;
+ * - pembayaran di dalam rentang dihitung sebagai Lunas;
+ * - pembayaran setelah tanggal akhir diperlakukan sebagai Belum Lunas pada
+ *   rentang tersebut (tanpa mengubah data asli di database);
+ * - pembayaran berstatus Lunas tanpa tanggal bayar yang valid tidak dianggap
+ *   Lunas dalam rentang tanggal karena waktunya tidak dapat diverifikasi.
+ *
+ * Semua perubahan hanya terjadi pada array di memori untuk kebutuhan analitik.
+ */
+function analitikApplySelectedRange(array $records, ?array $range = null): array
+{
+    if (!$range || (($range['filter_tipe'] ?? 'bulan') !== 'tanggal')) {
+        return $records;
+    }
+
+    $tanggalAwal = trim((string) ($range['tanggal_awal'] ?? ''));
+    $tanggalAkhir = trim((string) ($range['tanggal_akhir'] ?? ''));
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $tanggalAwal)
+        || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $tanggalAkhir)) {
+        return $records;
+    }
+
+    $filtered = [];
+    foreach ($records as $row) {
+        $statusAsli = (string) ($row['status_bayar'] ?? '');
+        $tanggalBayarAsli = $row['tanggal_bayar'] ?? null;
+        $nominalDibayarAsli = (float) ($row['nominal_dibayar'] ?? 0);
+
+        // Simpan nilai asli hanya sebagai metadata internal. Tidak menulis DB.
+        $row['status_bayar_asli'] = $statusAsli;
+        $row['tanggal_bayar_asli'] = $tanggalBayarAsli;
+        $row['nominal_dibayar_asli'] = $nominalDibayarAsli;
+        $row['pembayaran_dalam_rentang'] = false;
+
+        if ($statusAsli !== 'Lunas') {
+            // Tagihan yang memang belum lunas tetap relevan sampai akhir rentang.
+            $filtered[] = $row;
+            continue;
+        }
+
+        $tanggalBayar = analitikTanggalBayarYmd($tanggalBayarAsli);
+
+        if ($tanggalBayar !== '' && strcmp($tanggalBayar, $tanggalAwal) < 0) {
+            // Sudah lunas sebelum rentang dimulai: tidak menjadi bagian analisis
+            // pada rentang tanggal yang sedang dipilih.
+            continue;
+        }
+
+        if ($tanggalBayar !== ''
+            && strcmp($tanggalBayar, $tanggalAwal) >= 0
+            && strcmp($tanggalBayar, $tanggalAkhir) <= 0) {
+            $row['pembayaran_dalam_rentang'] = true;
+            $filtered[] = $row;
+            continue;
+        }
+
+        // Dibayar setelah batas akhir (atau tanggal bayar tidak dapat diverifikasi):
+        // pada rentang ini tagihan belum dianggap lunas. Nilai asli tetap ada pada
+        // metadata internal di atas dan database sama sekali tidak diubah.
+        $row['status_bayar'] = 'Belum Lunas';
+        $row['nominal_dibayar'] = 0.0;
+        $row['tanggal_bayar'] = null;
+        $filtered[] = $row;
+    }
+
+    return array_values($filtered);
+}
+
 function analitikLoadRecords(mysqli $koneksi, string $awal, string $akhir, array $scope): array
 {
     $union = "
@@ -228,7 +551,7 @@ function analitikLoadRecords(mysqli $koneksi, string $awal, string $akhir, array
             END AS nominal_tagihan,
             COALESCE(p.nominal_dibayar, 0) AS nominal_dibayar,
             p.tanggal_bayar,
-            p.langganan_selesai AS tanggal_jatuh_tempo,
+            COALESCE(p.langganan_selesai, LAST_DAY(p.waktu)) AS tanggal_jatuh_tempo,
             'berjalan' AS sumber_data
         FROM pelanggan_salam p
         WHERE DATE_FORMAT(p.waktu, '%Y-%m') BETWEEN ? AND ?
@@ -250,7 +573,7 @@ function analitikLoadRecords(mysqli $koneksi, string $awal, string $akhir, array
             COALESCE(t.nominal_tagihan, 0) AS nominal_tagihan,
             COALESCE(t.nominal_dibayar, 0) AS nominal_dibayar,
             t.tanggal_bayar,
-            t.tanggal_jatuh_tempo,
+            COALESCE(t.tanggal_jatuh_tempo, LAST_DAY(t.periode)) AS tanggal_jatuh_tempo,
             'riwayat' AS sumber_data
         FROM tagihan_salam t
         LEFT JOIN pelanggan_salam p ON p.id = t.pelanggan_id
@@ -358,9 +681,12 @@ function analitikBuildCustomerUnpaid(array $records, string $periodeAkhir): arra
 
 function analitikBuildTop5(array $records, string $awal, string $akhir): array
 {
-    // Ranking ini sengaja dibuat sederhana untuk pengguna non-teknis:
-    // siapa yang paling rajin membayar pada periode filter.
-    // Penilaian tidak lagi bergantung pada tanggal bayar vs jatuh tempo.
+    // Ranking pelanggan rajin bayar:
+    // 1) persentase lunas tertinggi,
+    // 2) jumlah periode lunas terbanyak,
+    // 3) streak lunas terpanjang,
+    // 4) jika masih sama, waktu pembayaran paling awal.
+    // tanggal_bayar disimpan sebagai DATETIME agar tanggal + jam dapat dibandingkan.
     $byCustomer = [];
     foreach ($records as $row) {
         $id = (int) ($row['pelanggan_id'] ?? 0);
@@ -388,12 +714,27 @@ function analitikBuildTop5(array $records, string $awal, string $akhir): array
         $totalPeriode = count($rows);
         $lunas = 0;
         $periodeLunasTerakhir = '';
+        $waktuBayarPertama = '';
 
         foreach ($rows as $periode => $row) {
             if (($row['status_bayar'] ?? '') === 'Lunas') {
                 $lunas++;
                 if ($periodeLunasTerakhir === '' || strcmp($periode, $periodeLunasTerakhir) > 0) {
                     $periodeLunasTerakhir = $periode;
+                }
+
+                // Simpan waktu pembayaran paling awal pada rentang analitik.
+                // Untuk data lama yang hanya memiliki tanggal, MySQL akan menyimpannya
+                // sebagai 00:00:00 setelah migrasi DATE -> DATETIME.
+                $tanggalBayar = trim((string) ($row['tanggal_bayar'] ?? ''));
+                if ($tanggalBayar !== '' && $tanggalBayar !== '0000-00-00' && $tanggalBayar !== '0000-00-00 00:00:00') {
+                    $timestamp = strtotime($tanggalBayar);
+                    if ($timestamp !== false) {
+                        $waktuValid = date('Y-m-d H:i:s', $timestamp);
+                        if ($waktuBayarPertama === '' || strcmp($waktuValid, $waktuBayarPertama) < 0) {
+                            $waktuBayarPertama = $waktuValid;
+                        }
+                    }
                 }
             }
         }
@@ -420,6 +761,7 @@ function analitikBuildTop5(array $records, string $awal, string $akhir): array
             'persen_lunas' => $persen,
             'streak' => $streakTerpanjang,
             'periode_lunas_terakhir' => $periodeLunasTerakhir,
+            'waktu_bayar_pertama' => $waktuBayarPertama,
         ]);
     }
 
@@ -433,7 +775,18 @@ function analitikBuildTop5(array $records, string $awal, string $akhir): array
         $cmpStreak = ((int) ($b['streak'] ?? 0)) <=> ((int) ($a['streak'] ?? 0));
         if ($cmpStreak !== 0) return $cmpStreak;
 
-        return strcasecmp((string) ($a['nama'] ?? ''), (string) ($b['nama'] ?? ''));
+        // Pemecah seri: tanggal + jam pembayaran paling awal.
+        $waktuA = trim((string) ($a['waktu_bayar_pertama'] ?? ''));
+        $waktuB = trim((string) ($b['waktu_bayar_pertama'] ?? ''));
+        if ($waktuA !== $waktuB) {
+            if ($waktuA === '') return 1;
+            if ($waktuB === '') return -1;
+            return strcmp($waktuA, $waktuB);
+        }
+
+        // Fallback deterministik jika data lama/dua transaksi benar-benar memiliki
+        // timestamp yang sama. Tidak menggunakan nama A-Z untuk menentukan ranking.
+        return ((int) ($a['pelanggan_id'] ?? 0)) <=> ((int) ($b['pelanggan_id'] ?? 0));
     });
 
     return array_slice($ranking, 0, 5);
@@ -494,16 +847,17 @@ function analitikBuildRegionFinancialComparison(array $records): array
     return array_values($regions);
 }
 
-function analitikBuild(mysqli $koneksi, string $awal, string $akhir, array $scope): array
+function analitikBuild(mysqli $koneksi, string $awal, string $akhir, array $scope, ?array $range = null): array
 {
     $records = analitikLoadRecords($koneksi, $awal, $akhir, $scope);
+    $records = analitikApplySelectedRange($records, $range);
     $periods = analitikPeriodeSequence($awal, $akhir);
 
     $customerSet = [];
     $paidCount = 0;
     $unpaidCount = 0;
     $totalPaid = 0.0;
-    $totalOutstanding = 0.0;
+    $totalOutstanding = 0.0; // hanya tagihan yang sudah jatuh tempo
 
     $trend = [];
     foreach ($periods as $p) {
@@ -547,16 +901,18 @@ function analitikBuild(mysqli $koneksi, string $awal, string $akhir, array $scop
                 $trend[$periode]['dibayar'] += $amount;
             }
         } else {
+            // Belum Bayar tetap menghitung semua tagihan yang belum lunas.
             $unpaidCount++;
             $amount = (float) ($row['nominal_tagihan'] ?? 0);
-            $totalOutstanding += $amount;
             if ($id > 0) $regionUnpaidCustomers[$region][$id] = true;
-            $regionOutstanding[$region] = ($regionOutstanding[$region] ?? 0) + $amount;
-            $periodOutstanding[$periode] = ($periodOutstanding[$periode] ?? 0) + $amount;
             if (isset($trend[$periode])) {
                 $trend[$periode]['belum']++;
-                $trend[$periode]['tunggakan'] += $amount;
             }
+
+            // Nilai tunggakan tidak dihitung dari dataset rentang ini saja.
+            // Setelah loop, tunggakan dimuat secara akumulatif dari seluruh
+            // riwayat sampai tanggal acuan supaya tunggakan bulan sebelumnya
+            // tetap terbawa sampai benar-benar lunas.
         }
 
         $class = analitikClassifyTimeliness($row);
@@ -583,6 +939,30 @@ function analitikBuild(mysqli $koneksi, string $awal, string $akhir, array $scop
     }
     usort($regionUnpaid, static fn(array $a, array $b): int => $b['persen'] <=> $a['persen']);
 
+    // Tunggakan bersifat akumulatif: ambil seluruh tagihan lama yang pada
+    // tanggal acuan sudah jatuh tempo dan belum lunas. Tanggal awal filter tidak
+    // menghapus tunggakan lama; tunggakan hilang hanya setelah lunas.
+    $overdueRecords = analitikLoadOverdueRecordsAsOf($koneksi, $akhir, $scope, $range);
+    $cutoffPeriod = substr(analitikTanggalAcuanTunggakan($range), 0, 7);
+    if (!preg_match('/^\d{4}-\d{2}$/', $cutoffPeriod)) $cutoffPeriod = $akhir;
+
+    foreach ($overdueRecords as $row) {
+        $amount = (float) ($row['nominal_tagihan'] ?? 0);
+        $region = (string) ($row['wilayah'] ?? '-');
+        $periode = (string) ($row['periode'] ?? '');
+
+        $totalOutstanding += $amount;
+        $regionOutstanding[$region] = ($regionOutstanding[$region] ?? 0) + $amount;
+        if ($periode !== '') {
+            $periodOutstanding[$periode] = ($periodOutstanding[$periode] ?? 0) + $amount;
+            // Grafik perkembangan tetap hanya menampilkan bulan dalam filter,
+            // tetapi bila bulan tersebut memiliki tunggakan, nilainya sinkron.
+            if (isset($trend[$periode])) {
+                $trend[$periode]['tunggakan'] += $amount;
+            }
+        }
+    }
+
     $outstandingChart = [];
     if ($scope['is_all']) {
         foreach (array_values(salamDaftarWilayahResmi()) as $region) {
@@ -594,7 +974,11 @@ function analitikBuild(mysqli $koneksi, string $awal, string $akhir, array $scop
         }
         usort($outstandingChart, static fn(array $a, array $b): int => $b['value'] <=> $a['value']);
     } else {
-        foreach ($periods as $p) {
+        // Untuk Admin Wilayah, tampilkan juga periode tunggakan lama yang masih
+        // aktif walaupun periodenya berada sebelum bulan awal filter.
+        $outstandingPeriods = array_keys($periodOutstanding);
+        sort($outstandingPeriods, SORT_STRING);
+        foreach ($outstandingPeriods as $p) {
             $outstandingChart[] = [
                 'key' => $p,
                 'label' => analitikPeriodLabel($p, true),
@@ -603,9 +987,14 @@ function analitikBuild(mysqli $koneksi, string $awal, string $akhir, array $scop
         }
     }
 
+    // Semua pelanggan belum bayar pada rentang terpilih tetap tersedia untuk
+    // panel Belum Bayar. Ini berbeda dari tunggakan akumulatif di atas.
     $unpaidCustomers = analitikBuildCustomerUnpaid($records, $akhir);
+
+    $overdueCustomers = analitikBuildCustomerUnpaid($overdueRecords, $cutoffPeriod);
+
     $aging = ['1' => 0, '2' => 0, '3plus' => 0];
-    foreach ($unpaidCustomers as $item) {
+    foreach ($overdueCustomers as $item) {
         $age = (int) ($item['lama_bulan'] ?? 1);
         if ($age <= 1) $aging['1']++;
         elseif ($age === 2) $aging['2']++;
@@ -625,6 +1014,9 @@ function analitikBuild(mysqli $koneksi, string $awal, string $akhir, array $scop
                 'is_all' => true,
                 'locked' => false,
             ]);
+        if (!$scope['is_all']) {
+            $comparisonRecords = analitikApplySelectedRange($comparisonRecords, $range);
+        }
         $regionComparison = analitikBuildRegionFinancialComparison($comparisonRecords);
     }
 
@@ -645,6 +1037,9 @@ function analitikBuild(mysqli $koneksi, string $awal, string $akhir, array $scop
         'aging' => $aging,
         'timeliness' => $timeliness,
         'unpaid_customers' => $unpaidCustomers,
+        'overdue_records' => $overdueRecords,
+        'overdue_customers' => $overdueCustomers,
+        'tanggal_acuan_tunggakan' => analitikTanggalAcuanTunggakan($range),
         'top5' => analitikBuildTop5($records, $awal, $akhir),
         'region_comparison' => $regionComparison,
     ];

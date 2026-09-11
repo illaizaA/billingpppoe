@@ -10,7 +10,7 @@ try {
     analitikRequireAccess();
     $range = analitikResolvePeriodRange($_GET);
     $scope = analitikResolveWilayah($_GET['wilayah'] ?? 'all');
-    $data = analitikBuild($koneksi, $range['awal'], $range['akhir'], $scope);
+    $data = analitikBuild($koneksi, $range['awal'], $range['akhir'], $scope, $range);
     $records = $data['records'];
     $type = trim((string) ($_GET['type'] ?? ''));
     $key = trim((string) ($_GET['key'] ?? ''));
@@ -30,6 +30,20 @@ try {
             salamRupiah((float) ($row['nominal_tagihan'] ?? 0)),
             salamRupiah((float) ($row['nominal_dibayar'] ?? 0)),
             salamBulananIndonesia($row['tanggal_bayar'] ?? null, true),
+        ];
+    };
+
+    // Khusus rincian tunggakan: tanggal bayar tidak ditampilkan karena
+    // baris yang masuk di sini memang tagihan yang masih menunggak.
+    $formatOutstandingRow = static function (array $row): array {
+        return [
+            $row['id_pelanggan'] ?? '-',
+            $row['nama'] ?? '-',
+            $row['wilayah'] ?? '-',
+            analitikPeriodLabel((string) ($row['periode'] ?? '')),
+            $row['status_bayar'] ?? '-',
+            salamRupiah((float) ($row['nominal_tagihan'] ?? 0)),
+            salamRupiah((float) ($row['nominal_dibayar'] ?? 0)),
         ];
     };
 
@@ -79,15 +93,15 @@ try {
             ['label' => 'Pelanggan', 'value' => count($customers) . ' orang'],
             ['label' => 'Total Belum Dibayar', 'value' => salamRupiah($total)],
         ];
-        $columns = ['ID', 'Nama', 'Wilayah', 'Tagihan Tertua', 'Periode Belum Lunas', 'Total Tunggakan'];
+        $columns = ['ID', 'Nama', 'Wilayah', 'Tagihan Tertua', 'Periode Belum Lunas', 'Total Belum Dibayar'];
         $rows = array_map(fn($r) => [
             $r['id_pelanggan'] ?? '-', $r['nama'] ?? '-', $r['wilayah'] ?? '-',
             analitikPeriodLabel((string) ($r['periode_tertua'] ?? '')), ($r['jumlah_periode'] ?? 0) . ' periode',
             salamRupiah((float) ($r['total_tunggakan'] ?? 0)),
         ], $customers);
     } elseif ($type === 'outstanding') {
-        $filtered = array_values(array_filter($records, function ($r) use ($scope, $key) {
-            if (($r['status_bayar'] ?? '') !== 'Belum Lunas') return false;
+        $overdueRecords = array_values($data['overdue_records'] ?? []);
+        $filtered = array_values(array_filter($overdueRecords, function ($r) use ($scope, $key) {
             return $scope['is_all'] ? (($r['wilayah'] ?? '') === $key) : (($r['periode'] ?? '') === $key);
         }));
         $title = $scope['is_all'] ? 'Rincian Tunggakan - ' . $key : 'Rincian Tunggakan - ' . analitikPeriodLabel($key);
@@ -98,10 +112,10 @@ try {
             ['label' => 'Total Tunggakan', 'value' => salamRupiah($amount)],
             ['label' => 'Pelanggan', 'value' => count(array_filter(array_keys($ids))) . ' orang'],
         ];
-        $columns = ['ID', 'Nama', 'Wilayah', 'Periode', 'Status', 'Tagihan', 'Dibayar', 'Tanggal Bayar'];
-        $rows = array_map($formatBillRow, $filtered);
+        $columns = ['ID', 'Nama', 'Wilayah', 'Periode', 'Status', 'Tagihan', 'Dibayar'];
+        $rows = array_map($formatOutstandingRow, $filtered);
     } elseif ($type === 'aging') {
-        $customers = array_values($data['unpaid_customers']);
+        $customers = array_values($data['overdue_customers'] ?? []);
         $filtered = array_values(array_filter($customers, function ($r) use ($key) {
             $age = (int) ($r['lama_bulan'] ?? 1);
             if ($key === '1') return $age <= 1;
@@ -140,12 +154,30 @@ try {
     } elseif ($type === 'customer') {
         $customerId = (int) $key;
         if ($customerId <= 0) throw new RuntimeException('Pelanggan tidak valid.');
-        $filtered = array_values(array_filter($records, fn($r) => (int) ($r['pelanggan_id'] ?? 0) === $customerId));
+
+        // Detail pelanggan membawa tunggakan lama yang masih aktif, tidak hanya
+        // tagihan pada bulan/rentang filter saat ini.
+        $selectedRows = array_values(array_filter($records, fn($r) => (int) ($r['pelanggan_id'] ?? 0) === $customerId));
+        $customerOverdue = array_values(array_filter(
+            $data['overdue_records'] ?? [],
+            fn($r) => (int) ($r['pelanggan_id'] ?? 0) === $customerId
+        ));
+
+        $byPeriod = [];
+        foreach ($customerOverdue as $r) {
+            $byPeriod[(string)($r['periode'] ?? '')] = $r;
+        }
+        foreach ($selectedRows as $r) {
+            $byPeriod[(string)($r['periode'] ?? '')] = $r;
+        }
+        $filtered = array_values($byPeriod);
+        usort($filtered, fn($a, $b) => strcmp((string)($a['periode'] ?? ''), (string)($b['periode'] ?? '')));
         if (!$filtered) throw new RuntimeException('Data pelanggan tidak ditemukan pada rentang dan cakupan akun ini.');
 
         $first = $filtered[0];
         $unpaidRows = array_values(array_filter($filtered, fn($r) => ($r['status_bayar'] ?? '') !== 'Lunas'));
-        $outstanding = array_sum(array_map(fn($r) => (float) ($r['nominal_tagihan'] ?? 0), $unpaidRows));
+        $overdueRows = $customerOverdue;
+        $outstanding = array_sum(array_map(fn($r) => (float) ($r['nominal_tagihan'] ?? 0), $overdueRows));
         $title = 'Detail Pembayaran - ' . ($first['nama'] ?? '-');
         $summary = [
             ['label' => 'ID Pelanggan', 'value' => $first['id_pelanggan'] ?? '-'],

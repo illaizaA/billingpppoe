@@ -91,7 +91,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update'])) {
             if ($statusBayar === 'Lunas') {
                 $stmtHistory = $koneksi->prepare("UPDATE tagihan_salam
                     SET nominal_tagihan=?, tanggal_jatuh_tempo=?, status_bayar='Lunas',
-                        tanggal_bayar=CURDATE(), nominal_dibayar=?
+                        tanggal_bayar=NOW(), nominal_dibayar=?
                     WHERE id=?");
                 $stmtHistory->bind_param('dsdi', $nominalRiwayat, $masaAktifSampai, $nominalRiwayat, $historyId);
             } else {
@@ -166,7 +166,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update'])) {
                         langganan_selesai = ?,
                         status_bayar = 'Lunas',
                         tagihan = 0,
-                        tanggal_bayar = CURDATE(),
+                        tanggal_bayar = NOW(),
                         nominal_dibayar = ?
                     WHERE id = ?";
             $stmt = $koneksi->prepare($sql);

@@ -251,7 +251,7 @@ function analitikPppoeFindBillingMatch(array $pppoeRow, array $index): ?array
 /**
  * Ringkas status tagihan per pelanggan untuk rentang analitik terpilih.
  */
-function analitikPppoeBillingSummaryByCustomer(array $records, string $periodeAkhir): array
+function analitikPppoeBillingSummaryByCustomer(array $records, string $periodeAkhir, ?array $range = null): array
 {
     $summary = [];
 
@@ -264,6 +264,7 @@ function analitikPppoeBillingSummaryByCustomer(array $records, string $periodeAk
                 'tagihan' => 0,
                 'lunas' => 0,
                 'belum' => 0,
+                'menunggak' => 0,
                 'total_tunggakan' => 0.0,
                 'periode_tertua' => null,
                 'lama_bulan' => 0,
@@ -277,10 +278,17 @@ function analitikPppoeBillingSummaryByCustomer(array $records, string $periodeAk
         }
 
         $summary[$id]['belum']++;
-        $summary[$id]['total_tunggakan'] += (float) ($row['nominal_tagihan'] ?? 0);
-        $periode = (string) ($row['periode'] ?? '');
-        if ($periode !== '' && ($summary[$id]['periode_tertua'] === null || strcmp($periode, $summary[$id]['periode_tertua']) < 0)) {
-            $summary[$id]['periode_tertua'] = $periode;
+
+        // Peta membedakan "belum bayar" dan "tunggakan". Nominal tunggakan
+        // hanya bertambah jika tanggal jatuh tempo sudah tercapai pada tanggal
+        // acuan filter analitik.
+        if (analitikIsOverdue($row, $range)) {
+            $summary[$id]['menunggak']++;
+            $summary[$id]['total_tunggakan'] += (float) ($row['nominal_tagihan'] ?? 0);
+            $periode = (string) ($row['periode'] ?? '');
+            if ($periode !== '' && ($summary[$id]['periode_tertua'] === null || strcmp($periode, $summary[$id]['periode_tertua']) < 0)) {
+                $summary[$id]['periode_tertua'] = $periode;
+            }
         }
     }
 
@@ -302,7 +310,7 @@ function analitikPppoeMapStatus(?array $billing, ?array $billSummary): array
     if (!$billSummary || (int) ($billSummary['tagihan'] ?? 0) <= 0) {
         return ['key' => 'nodata', 'label' => 'Tidak ada tagihan pada periode'];
     }
-    if ((int) ($billSummary['belum'] ?? 0) <= 0) {
+    if ((int) ($billSummary['menunggak'] ?? 0) <= 0 || (float) ($billSummary['total_tunggakan'] ?? 0) <= 0) {
         return ['key' => 'paid', 'label' => 'Tidak ada tunggakan'];
     }
     if ((int) ($billSummary['lama_bulan'] ?? 0) >= 3) {
@@ -558,7 +566,7 @@ function analitikPppoeBuildRegionSummaries(array $points, array $billingRows, ar
         $regions[$regionKey]['tagihan_belum'] += (int) ($bill['belum'] ?? 0);
         $regions[$regionKey]['total_tunggakan'] += (float) ($bill['total_tunggakan'] ?? 0);
 
-        if ((int) ($bill['belum'] ?? 0) > 0) {
+        if ((int) ($bill['menunggak'] ?? 0) > 0) {
             $regions[$regionKey]['pelanggan_menunggak']++;
         }
         $regions[$regionKey]['max_lama_bulan'] = max(
@@ -607,7 +615,7 @@ function analitikPppoeBuildRegionSummaries(array $points, array $billingRows, ar
         if ($region['pelanggan_bertagihan'] <= 0) {
             $statusKey = 'nodata';
             $statusLabel = 'Belum ada tagihan pada periode';
-        } elseif ($region['tagihan_belum'] <= 0 || $region['total_tunggakan'] <= 0) {
+        } elseif ($region['total_tunggakan'] <= 0) {
             $statusKey = 'paid';
             $statusLabel = 'Tidak ada tunggakan';
         } elseif ($region['max_lama_bulan'] >= 3) {
@@ -671,7 +679,7 @@ function analitikPppoeBuildRegionSummaries(array $points, array $billingRows, ar
     ];
 }
 
-function analitikBuildPppoeMap(mysqli $koneksi, string $awal, string $akhir, array $scope): array
+function analitikBuildPppoeMap(mysqli $koneksi, string $awal, string $akhir, array $scope, ?array $range = null): array
 {
     $pppoes = analitikPppoeFetchReadonly(PPPOE_MONITOR_API_URL, PPPOE_MONITOR_TIMEOUT_SECONDS);
     $billingRows = analitikPppoeLoadBillingRows($koneksi, $scope);
@@ -683,7 +691,8 @@ function analitikBuildPppoeMap(mysqli $koneksi, string $awal, string $akhir, arr
     }
     $billingIndex = analitikPppoeBuildBillingIndex($billingRows, $validPppoeIds);
     $records = analitikLoadRecords($koneksi, $awal, $akhir, $scope);
-    $billingSummary = analitikPppoeBillingSummaryByCustomer($records, $akhir);
+    $records = analitikApplySelectedRange($records, $range);
+    $billingSummary = analitikPppoeBillingSummaryByCustomer($records, $akhir, $range);
 
     $points = [];
 
@@ -735,6 +744,7 @@ function analitikBuildPppoeMap(mysqli $koneksi, string $awal, string $akhir, arr
                 'tagihan' => (int) ($bill['tagihan'] ?? 0),
                 'lunas' => (int) ($bill['lunas'] ?? 0),
                 'belum' => (int) ($bill['belum'] ?? 0),
+                'menunggak' => (int) ($bill['menunggak'] ?? 0),
                 'total_tunggakan' => (float) ($bill['total_tunggakan'] ?? 0),
                 'periode_tertua' => (string) ($bill['periode_tertua'] ?? ''),
                 'periode_tertua_label' => !empty($bill['periode_tertua']) ? analitikPeriodLabel((string) $bill['periode_tertua']) : '-',

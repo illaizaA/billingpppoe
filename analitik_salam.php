@@ -24,14 +24,14 @@ $wilayahOptions = array_values(salamDaftarWilayahResmi());
 
 $errorAnalitik = null;
 try {
-    $analitik = analitikBuild($koneksi, $range['awal'], $range['akhir'], $scope);
+    $analitik = analitikBuild($koneksi, $range['awal'], $range['akhir'], $scope, $range);
 } catch (Throwable $e) {
     $errorAnalitik = $e->getMessage();
     $analitik = [
         'summary'=>['pelanggan'=>0,'tagihan'=>0,'lunas'=>0,'belum'=>0,'tingkat_bayar'=>0,'total_dibayar'=>0,'total_tunggakan'=>0],
         'trend'=>[], 'region_unpaid'=>[], 'outstanding'=>[],
         'aging'=>['1'=>0,'2'=>0,'3plus'=>0],
-        'timeliness'=>['before'=>0,'on'=>0,'late'=>0,'unpaid'=>0,'unknown'=>0], 'top5'=>[], 'unpaid_customers'=>[], 'region_comparison'=>[],
+        'timeliness'=>['before'=>0,'on'=>0,'late'=>0,'unpaid'=>0,'unknown'=>0], 'top5'=>[], 'unpaid_customers'=>[], 'overdue_customers'=>[], 'overdue_records'=>[], 'region_comparison'=>[],
     ];
 }
 
@@ -40,9 +40,10 @@ $regionUnpaid = $analitik['region_unpaid'];
 $outstanding = $analitik['outstanding'];
 $top5 = $analitik['top5'];
 $unpaidCustomers = $analitik['unpaid_customers'] ?? [];
+$overdueCustomers = $analitik['overdue_customers'] ?? [];
 $regionComparison = $analitik['region_comparison'] ?? [];
-$priorityCustomers = array_slice(array_values($unpaidCustomers), 0, 4);
-$priorityOutstanding = array_sum(array_map(static fn($r) => (float)($r['total_tunggakan'] ?? 0), $unpaidCustomers));
+$priorityCustomers = array_slice(array_values($overdueCustomers), 0, 4);
+$priorityOutstanding = array_sum(array_map(static fn($r) => (float)($r['total_tunggakan'] ?? 0), $overdueCustomers));
 
 $rangeLabel = $range['filter_tipe'] === 'tanggal'
     ? analitikDateLabel($range['tanggal_awal']) . ' - ' . analitikDateLabel($range['tanggal_akhir'])
@@ -575,7 +576,7 @@ $maxOutstanding = max(1, ...array_map(fn($r)=>(float)$r['value'], $outstanding ?
                     <a class="btn btn-reset" href="analitik_salam.php"><i class="fas fa-rotate-left" style="margin-right:6px"></i> Reset</a>
                     <button class="btn btn-export-all" type="button" data-export-all title="Unduh semua hasil analitik beserta rinciannya dalam satu file Excel"><i class="fas fa-file-excel"></i> Export Semua Analitik</button>
                 </div>
-                <div class="date-filter-note <?= $range['filter_tipe']==='tanggal'?'':'filter-field-hidden' ?>" data-filter-tanggal-note>Rentang tanggal mencakup seluruh tagihan pada bulan yang tersentuh agar data lunas dan belum lunas tetap lengkap.</div>
+                <div class="date-filter-note <?= $range['filter_tipe']==='tanggal'?'':'filter-field-hidden' ?>" data-filter-tanggal-note>Rentang tanggal mengikuti tanggal pembayaran yang dipilih. Pembayaran di luar rentang tidak dihitung sebagai pembayaran pada hasil analitik.</div>
             </div>
         </form>
     </div>
@@ -626,8 +627,8 @@ $maxOutstanding = max(1, ...array_map(fn($r)=>(float)$r['value'], $outstanding ?
                 <div class="chart-area" style="justify-content:flex-start">
                     <div class="priority-summary">
                         <div class="priority-stat">
-                            <b><?= number_format(count($unpaidCustomers)) ?></b>
-                            <span>Pelanggan belum bayar</span>
+                            <b><?= number_format(count($overdueCustomers)) ?></b>
+                            <span>Pelanggan menunggak</span>
                         </div>
                         <div class="priority-stat">
                             <b><?= htmlspecialchars(analitikRupiahCompact((float)$priorityOutstanding)) ?></b>

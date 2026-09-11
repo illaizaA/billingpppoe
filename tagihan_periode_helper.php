@@ -130,7 +130,7 @@ function salamUpdateStatusTagihanPeriode(mysqli $koneksi, int $pelangganId, stri
             $nominal = (float) ($record['tagihan'] ?? 0);
             if ($nominal <= 0) $nominal = (float) ($record['tarif_langganan'] ?? 0);
             $stmt = $koneksi->prepare("UPDATE pelanggan_salam
-                SET status_bayar='Lunas', nominal_dibayar=?, tanggal_bayar=CURDATE(), tagihan=0
+                SET status_bayar='Lunas', nominal_dibayar=?, tanggal_bayar=NOW(), tagihan=0
                 WHERE id=?");
             $stmt->bind_param('di', $nominal, $pelangganId);
         } else {
@@ -146,7 +146,7 @@ function salamUpdateStatusTagihanPeriode(mysqli $koneksi, int $pelangganId, stri
             if (($record['status_bayar'] ?? '') === 'Lunas') return true;
             $nominal = (float) ($record['nominal_tagihan_asli'] ?? $record['tarif_langganan'] ?? 0);
             $stmt = $koneksi->prepare("UPDATE tagihan_salam
-                SET status_bayar='Lunas', nominal_dibayar=?, tanggal_bayar=CURDATE()
+                SET status_bayar='Lunas', nominal_dibayar=?, tanggal_bayar=NOW()
                 WHERE id=?");
             $stmt->bind_param('di', $nominal, $historyId);
         } else {
